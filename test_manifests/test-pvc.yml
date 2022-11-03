@@ -5,8 +5,11 @@ metadata:
   namespace: default
   labels:
     app: test
+  annotations:
+    ragdollphysics.org/disk-node: "docker-desktop"
+    ragdollphysics.org/shared-storage-path: "testpath"
 spec:
-  storageClassName: lab-disk-nfs
+  storageClassName: lab-disk-shared
   accessModes:
     - ReadWriteOnce
   resources:

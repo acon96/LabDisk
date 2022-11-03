@@ -1,63 +1,61 @@
-import os
-import json
 import logging
-import asyncio
 import kopf
 import kubernetes
 
-PROVISIONER = os.environ.get("PROVISIONER", "ragdollphysics.org/lab-disk")
+import config
+import util
+import nfs
+
 NODE_SELECTOR_ANNOTATION_KEY = "ragdollphysics.org/disk-node"
+SHARED_STORAGE_PATH_ANNOTATION_KEY = "ragdollphysics.org/shared-storage-path"
 VOLUME_TYPE_NFS = "nfs"
 VOLUME_TYPE_ISCSI = "iscsi"
 VOLUME_TYPE_SHARED = "shared-nfs"
 
-kubernetes.config.load_kube_config()
+util.setup_kube_client()
+logger = logging.getLogger("handler")
 
-logger = logging.getLogger(__name__)
+registered_storage_classes = []
 
 @kopf.on.login()
 def api_login(**kwargs):
-    return kopf.login_with_service_account(**kwargs) or kopf.login_with_kubeconfig(**kwargs)
+    return kopf.login_via_client(**kwargs)
 
-def register_pvc_handlers(storage_class_name):
-    kopf.on.create("persistentvolumeclaim", field="spec.storageClassName", value=storage_class_name)(create_volume)
-    kopf.on.update("persistentvolumeclaim", field="spec.storageClassName", value=storage_class_name)(update_volume)
-    kopf.on.delete("persistentvolumeclaim", field="spec.storageClassName", value=storage_class_name)(delete_volume)
-
-def validate_and_register_storage_class(logger, storage_class):
-    name = storage_class.metadata.name
-    if storage_class.parameters["type"].lower() not in [VOLUME_TYPE_ISCSI, VOLUME_TYPE_NFS]:
-        logger.error(f"Unrecorgnized LabDisk volume type: {storage_class.parameters['type']}")
+def validate_and_register_storage_class(name, type):
+    if type.lower() not in [VOLUME_TYPE_ISCSI, VOLUME_TYPE_NFS, VOLUME_TYPE_SHARED]:
+        logger.error(f"Unrecognized LabDisk volume type: {type.lower()}")
         return
 
     logger.info(f"Found valid LabDisk storage class {name}. Registering PVC Handlers.")
-    register_pvc_handlers(name)
+    registered_storage_classes.append(name)
+
+def new_storageclass(name, **kwargs):
+    storage_api = kubernetes.client.StorageV1Api()
+    sc = storage_api.read_storage_class(name)
+
+    validate_and_register_storage_class(name, sc.parameters['type'])
 
 @kopf.on.startup()
-async def operator_startup(logger, **kwargs):
-    # todo: setup config in a configmap
-    # load the configmap via kubernetes api
-    # config defines:
-    # - provisioner name
-    # - lvm volume group to use
-    # - base path for shared nfs volumes
+async def operator_startup(**kwargs):
+    config.setup()
 
+    if config.get().shared_volumes_enabled:
+        logger.info("Starting shared NFS export...")
+        # make sure the main nfs share that backs shared volumes is exported
+        nfs.export_share("main-shared", config.get().shared_nfs_root, config.get().access_cidr)
+    
     storage_api = kubernetes.client.StorageV1Api()
     storage_classes = storage_api.list_storage_class()
-
-    # todo: setup and export main nfs share
-
     for sc in storage_classes.items:
         metadata = sc.metadata
-        if sc.provisioner != PROVISIONER:
+        if sc.provisioner != config.get().provisioner_name:
             logger.debug(f"Ignoring storage class {metadata.name}...")
             continue
 
-        validate_and_register_storage_class(logger, sc)
+        validate_and_register_storage_class(metadata.name, sc.parameters["type"])
 
-@kopf.on.create("storageclass", field="provisioner", value=PROVISIONER)
-def new_storageclass(spec, logger, **kwargs):
-    validate_and_register_storage_class(logger, spec)
+    # register handler for new storageclasses
+    kopf.on.create("storageclass", field="provisioner", value=config.get().provisioner_name)(new_storageclass)
 
 
 def get_storage_class_params(name):
@@ -71,50 +69,77 @@ def get_storage_class_params(name):
     params["annotations"] = storage_class.metadata.annotations
 
     return params
-        
 
-def validate_pvc_spec(spec, update=False):
+def validate_pvc_spec(spec, meta, update=False):
     spec = dict(spec)
     storage_class_params = get_storage_class_params(spec["storageClassName"])
     if storage_class_params["type"] != VOLUME_TYPE_SHARED and ("ReadWriteMany" in spec["accessModes"] or "ReadOnlyMany" in spec["accessModes"]):
-        kopf.PermanentError(f"LabDisk only supports ReadWriteMany/ReadOnlyMany volumes using the '{VOLUME_TYPE_SHARED}' disk type")
+        raise kopf.PermanentError(f"LabDisk only supports ReadWriteMany/ReadOnlyMany volumes using the '{VOLUME_TYPE_SHARED}' disk type")
     
-    if NODE_SELECTOR_ANNOTATION_KEY not in storage_class_params["annotations"]:
-        kopf.PermanentError(f"No node was selected to store the volume. (PVC missing annotation '{NODE_SELECTOR_ANNOTATION_KEY}'")
+    if NODE_SELECTOR_ANNOTATION_KEY not in meta.annotations:
+        raise kopf.PermanentError(f"No node was selected to store the volume. (PVC missing annotation '{NODE_SELECTOR_ANNOTATION_KEY}'")
     
     return storage_class_params
 
-def create_volume(meta, spec, logger, **kwargs):
-    storage_class_params = validate_pvc_spec(spec)
+@kopf.on.create("persistentvolumeclaim")
+def create_volume(meta, spec, **kwargs):
+    storage_class_params = validate_pvc_spec(spec, meta)
+
+    if spec["storageClassName"] not in registered_storage_classes:
+        logger.info(f"Volume creation for storage class that we are not monitoring. ({spec['storageClassName']})")
+        return
+
+    volume_node = meta.annotations[NODE_SELECTOR_ANNOTATION_KEY]
+    us = config.get().current_node_name
+    if volume_node != us:
+        logger.info(f"Volume creation not for this node. (Request: {volume_node}, Us: {us}")
+        return
+
     desired_volume_size = spec["resources"].get("limits", {}).get("storage", spec["resources"].get("requests", {}).get("storage"))
     volume_type = storage_class_params["type"]
 
     if not desired_volume_size:
-        kopf.PermanentError("No volume size provided")
-
-    if volume_type != VOLUME_TYPE_SHARED:
-        pass # todo: provision lvm volume using lvm2py for individual volumes
-
-    if volume_type == VOLUME_TYPE_ISCSI:
-        # todo: setup iscsi exports using rtstlib-fb
-        # todo: create the pv object using the iscsi share info
-        pass 
+        raise kopf.PermanentError("No volume size provided")
 
     if volume_type == VOLUME_TYPE_SHARED:
-        # todo: make sure the folder exists under the main nfs share
-        # todo: create the pv object using the main nfs share and the subpath from the pvc spec
-        pass
+        if not config.get().shared_volumes_enabled:
+            raise kopf.PermanentError("This instance of LabDisk does not have shared volumes configured")
 
-    if volume_type == VOLUME_TYPE_NFS:
-        # todo: locally mount lvm volume where NFS can access it
-        # todo: setup nfs share exports by writing to /etc/exports directly and running exportfs
-        # todo: create the pv object using the specific NFS share
-        pass
+        storage_path = meta.annotations.get(SHARED_STORAGE_PATH_ANNOTATION_KEY)
+        if storage_path == None:
+            raise kopf.PermanentError(f"No storage path provided for shared storage. (PVC missing annotation '{SHARED_STORAGE_PATH_ANNOTATION_KEY}'")
+
+        # prevent misusing shared storage to gain access to other host paths
+        if ".." in storage_path:
+            raise kopf.PermanentError(f"Cannot use storage path outside of the shared NFS root! (storage path '{storage_path}')")
+
+        util.run_process(["mkdir", "-p", f"{config.get().shared_nfs_root}/{storage_path}"])
+
+        # todo: create the pv object using the main nfs share and the subpath for this volume
+    else:
+        if not config.get().individual_volumes_enabled:
+            raise kopf.PermanentError("This instance of LabDisk does not have individual volumes configured")
+
+        # todo: provision lvm volume using lvm2py for individual volumes
+
+        if volume_type == VOLUME_TYPE_ISCSI:
+            # todo: setup iscsi exports using rtstlib-fb
+            # todo: create the pv object using the iscsi share info
+            raise NotImplementedError()
+
+        if volume_type == VOLUME_TYPE_NFS:
+            # todo: locally mount lvm volume where NFS can access it
+            # todo: setup nfs share exports by writing to /etc/exports directly and running exportfs
+            # todo: create the pv object using the specific NFS share
+            raise NotImplementedError()
 
     logger.info(f"Successfully provisioned volume for claim {meta.name}")
-    
-def update_volume(spec, old, new, diff, **kwargs):
-    validate_pvc_spec(spec, update=True)
 
+@kopf.on.update("persistentvolumeclaim")
+def update_volume(spec, meta, old, new, diff, **kwargs):
+    validate_pvc_spec(spec, meta, update=True)
+
+
+@kopf.on.delete("persistentvolumeclaim")
 def delete_volume(spec, **kwargs):
     pass

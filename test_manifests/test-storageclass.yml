@@ -1,9 +1,9 @@
 apiVersion: storage.k8s.io/v1
 kind: StorageClass
 metadata:
-  name: lab-disk-nfs
+  name: lab-disk-shared
 provisioner: ragdollphysics.org/lab-disk
 parameters:
-  type: nfs
+  type: shared-nfs
 reclaimPolicy: Retain
 allowVolumeExpansion: true

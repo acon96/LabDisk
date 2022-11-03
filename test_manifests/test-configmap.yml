@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: lab-disk-config
+  namespace: kube-system
+data:
+  provisioner: ragdollphysics.org/lab-disk
+  # lvm_group: kube-vg
+  shared_nfs_root: /mnt/nfs
+  access_cidr: 10.0.0.0/8

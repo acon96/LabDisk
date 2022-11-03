@@ -1,0 +1,55 @@
+kind: DaemonSet
+apiVersion: apps/v1
+metadata:
+  name: lab-disk
+  namespace: kube-system
+spec:
+  selector:
+    matchLabels:
+      app: storage
+      component: lab-disk
+  template:
+    metadata:
+      labels:
+        app: storage
+        component: lab-disk
+    spec:
+      serviceAccountName: lab-disk
+      containers:
+      - name: lab-disk
+        image: docker-registry.home/lab-disk:latest
+        imagePullPolicy: Always
+        env:
+        - name: LAB_DISK_CONFIGMAP
+          value: lab-disk-config
+        - name: LAB_DISK_NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        - name: LAB_DISK_NODE_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.hostIP
+        resources:
+          requests:
+            cpu: 100m
+            memory: 16Mi
+          limits:
+            cpu: 500m
+            memory: 128Mi
+        volumeMounts:
+        - name: nfs-mount-root
+          mountPath: /mnt/
+        - name: nfs-exports
+          mountPath: /app/exports.d
+      # nodeSelector:
+      #   legacy-nfs: "true"
+      volumes:
+      - name: nfs-mount-root
+        hostPath:
+          path: /mnt/
+          type: DirectoryOrCreate
+      - name: nfs-exports
+        hostPath:
+          path: /etc/exports.d
+          type: DirectoryOrCreate
