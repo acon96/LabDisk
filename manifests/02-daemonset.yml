@@ -19,6 +19,10 @@ spec:
       - name: lab-disk
         image: docker-registry.home/lab-disk:latest
         imagePullPolicy: Always
+        securityContext:
+          privileged: true
+          capabilities:
+            add: [ SYS_ADMIN ]
         env:
         - name: LAB_DISK_CONFIGMAP
           value: lab-disk-config
@@ -36,10 +40,18 @@ spec:
             memory: 16Mi
           limits:
             cpu: 500m
-            memory: 128Mi
+            memory: 128Mi        
         volumeMounts:
         - name: nfs-mount-root
           mountPath: /mnt/
+        - name: syskernelconfig
+          mountPath: /sys/kernel/config
+        - name: runlvm
+          mountPath: /run/lvm
+        - name: libmodules
+          mountPath: /lib/modules
+        - name: dev
+          mountPath: /dev
         - name: nfs-exports
           mountPath: /app/exports.d
       # nodeSelector:
@@ -48,7 +60,18 @@ spec:
       - name: nfs-mount-root
         hostPath:
           path: /mnt/
-          type: DirectoryOrCreate
+      - name: syskernelconfig 
+        hostPath:
+          path: /sys/kernel/config
+      - name: runlvm 
+        hostPath:
+          path: /run/lvm
+      - name: libmodules 
+        hostPath:
+          path: /lib/modules
+      - name: dev 
+        hostPath:
+          path: /dev/
       - name: nfs-exports
         hostPath:
           path: /etc/exports.d

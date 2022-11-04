@@ -1,0 +1,29 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: test-app
+  namespace: default
+  labels:
+    app: test-app
+spec:
+  selector:
+    matchLabels:
+      app: test-app
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: test-app
+    spec:
+      containers:
+      - name: nginx
+        image: nginx:latest
+        ports:
+          - containerPort: 80
+        volumeMounts:
+        - name: test-volume
+          mountPath: /mnt/test-volume
+      volumes:
+        - name: test-volume
+          persistentVolumeClaim:
+            claimName: test-data

@@ -4,7 +4,6 @@ import config
 import util
 
 NFS_MOUNT_FLAGS = "rw,sync,no_subtree_check,insecure,no_root_squash"
-EXPORTS_DIR = "/app/exports.d"
 
 logger = logging.getLogger(__name__)
 
@@ -23,13 +22,11 @@ def get_exported_filesystems():
     
     return result
 
-def export_share(name, mount, client):
+def export_share(mount, client):
     if (mount, client) in get_exported_filesystems():
         return # share already mounted
 
     logger.info(f"Exporting fs '{mount}'")
+    util.run_process(["exportfs", "-o", NFS_MOUNT_FLAGS, f"{client}:{mount}"])
 
-    with open(f"{EXPORTS_DIR}/{name}", "w+") as f:
-        f.write(f"{mount} {client}({NFS_MOUNT_FLAGS})\n")
-
-    mounts = util.run_process(["exportfs", "-a"])
+# TODO: add an api so that we can call this code in another pod that is running with host networking

@@ -10,10 +10,10 @@ class Config:
         if not configmap_name:
             raise Exception("No config specified! Please set the 'LAB_DISK_CONFIGMAP' env variable.")
 
-        namespace = os.environ.get("LAB_DISK_NAMESPACE", "kube-system")
+        self.namespace = os.environ.get("LAB_DISK_NAMESPACE", "kube-system")
 
         core_api = kubernetes.client.CoreV1Api()
-        config = core_api.read_namespaced_config_map(name=configmap_name, namespace=namespace).data
+        config = core_api.read_namespaced_config_map(name=configmap_name, namespace=self.namespace).data
     
         self.provisioner_name = config.get("provisioner")
         self.lvm_group = config.get("lvm_group")

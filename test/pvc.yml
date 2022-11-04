@@ -6,7 +6,7 @@ metadata:
   labels:
     app: test
   annotations:
-    ragdollphysics.org/disk-node: "docker-desktop"
+    ragdollphysics.org/disk-node: k8s-dev
     ragdollphysics.org/shared-storage-path: "testpath"
 spec:
   storageClassName: lab-disk-shared

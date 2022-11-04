@@ -1,4 +1,4 @@
-import logging
+import logging, uuid
 import kopf
 import kubernetes
 
@@ -42,7 +42,7 @@ async def operator_startup(**kwargs):
     if config.get().shared_volumes_enabled:
         logger.info("Starting shared NFS export...")
         # make sure the main nfs share that backs shared volumes is exported
-        nfs.export_share("main-shared", config.get().shared_nfs_root, config.get().access_cidr)
+        nfs.export_share(config.get().shared_nfs_root, config.get().access_cidr)
     
     storage_api = kubernetes.client.StorageV1Api()
     storage_classes = storage_api.list_storage_class()
@@ -81,6 +81,30 @@ def validate_pvc_spec(spec, meta, update=False):
     
     return storage_class_params
 
+def create_persistent_volume_nfs(pv_name, access_modes, desired_capacity, nfs_server, volume_path, sc_name, volume_mode):
+
+    pv = {
+        "accessModes": access_modes,
+        "capacity": {"storage": desired_capacity},
+        # "mount_options": None,
+        "nfs": {
+            "path": volume_path,
+            "readOnly": False,
+            "server": nfs_server
+        },
+        "storageClassName": sc_name,
+        "volumeMode": volume_mode,
+    }
+
+    body = kubernetes.client.V1PersistentVolume(api_version='v1', spec=pv,
+        metadata=kubernetes.client.V1ObjectMeta(name=pv_name, labels={"app": "storage", "component": "lab-disk"}), 
+        kind="PersistentVolume"
+    )
+
+    core_api = kubernetes.client.CoreV1Api()
+    core_api.create_persistent_volume(body)
+
+
 @kopf.on.create("persistentvolumeclaim")
 def create_volume(meta, spec, **kwargs):
     storage_class_params = validate_pvc_spec(spec, meta)
@@ -96,6 +120,7 @@ def create_volume(meta, spec, **kwargs):
         return
 
     desired_volume_size = spec["resources"].get("limits", {}).get("storage", spec["resources"].get("requests", {}).get("storage"))
+    access_modes = spec["accessModes"]
     volume_type = storage_class_params["type"]
 
     if not desired_volume_size:
@@ -113,9 +138,12 @@ def create_volume(meta, spec, **kwargs):
         if ".." in storage_path:
             raise kopf.PermanentError(f"Cannot use storage path outside of the shared NFS root! (storage path '{storage_path}')")
 
-        util.run_process(["mkdir", "-p", f"{config.get().shared_nfs_root}/{storage_path}"])
+        volume_directory = f"{config.get().shared_nfs_root}/{storage_path}"
+        util.run_process(["mkdir", "-p", volume_directory])
 
         # todo: create the pv object using the main nfs share and the subpath for this volume
+        pv_name = f"pvc-{uuid.uuid4()}"
+        create_persistent_volume_nfs(pv_name, access_modes, desired_volume_size, config.get().current_node_ip, volume_directory, spec["storageClassName"], spec["volumeMode"])
     else:
         if not config.get().individual_volumes_enabled:
             raise kopf.PermanentError("This instance of LabDisk does not have individual volumes configured")
