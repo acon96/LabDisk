@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: test-lvm-nfs
+  namespace: default
+  labels:
+    app: test
+  annotations:
+    ragdollphysics.org/disk-node: k8s-dev
+    ragdollphysics.org/shared-storage-path: "testpath"
+spec:
+  storageClassName: lab-disk-nfs
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 512Mi

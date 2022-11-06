@@ -16,9 +16,13 @@ class Config:
         config = core_api.read_namespaced_config_map(name=configmap_name, namespace=self.namespace).data
     
         self.provisioner_name = config.get("provisioner")
+
+        if not self.provisioner_name:
+            raise Exception("No proviioner name provided for this instance!")
+
         self.lvm_group = config.get("lvm_group")
         self.shared_nfs_root = config.get("shared_nfs_root")
-        self.access_cidr = config.get("access_cidr", "0.0.0.0/0")
+        self.access_cidr = config.get("access_cidr", "0.0.0.0/0")      
 
         self.current_node_ip = os.environ.get("LAB_DISK_NODE_IP")
         if not self.current_node_ip:
@@ -29,7 +33,9 @@ class Config:
         self.shared_volumes_enabled = self.shared_nfs_root != None
         self.individual_volumes_enabled = self.lvm_group != None
 
-        
+        logger.info(f"Shared Volumes Enabled: {self.shared_volumes_enabled}")
+        logger.info(f"Individual Volumes Enabled: {self.individual_volumes_enabled}")
+
 
 # global config object
 config = None

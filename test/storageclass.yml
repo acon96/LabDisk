@@ -7,3 +7,13 @@ parameters:
   type: shared-nfs
 reclaimPolicy: Retain
 allowVolumeExpansion: true
+---
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: lab-disk-nfs
+provisioner: ragdollphysics.org/lab-disk
+parameters:
+  type: nfs
+reclaimPolicy: Retain
+allowVolumeExpansion: true

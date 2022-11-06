@@ -5,6 +5,6 @@ metadata:
   namespace: kube-system
 data:
   provisioner: ragdollphysics.org/lab-disk
-  # lvm_group: kube-vg
+  lvm_group: vg-kube
   shared_nfs_root: /mnt/nfs
   access_cidr: 10.0.0.0/8

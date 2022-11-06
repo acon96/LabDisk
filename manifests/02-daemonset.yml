@@ -43,7 +43,7 @@ spec:
             memory: 128Mi        
         volumeMounts:
         - name: nfs-mount-root
-          mountPath: /mnt/
+          mountPath: /srv/nfs
         - name: syskernelconfig
           mountPath: /sys/kernel/config
         - name: runlvm
@@ -52,14 +52,17 @@ spec:
           mountPath: /lib/modules
         - name: dev
           mountPath: /dev
-        - name: nfs-exports
-          mountPath: /app/exports.d
+        - name: varlibnfs
+          mountPath: /var/lib/nfs
+        - name: hostetc
+          mountPath: /app/hostetc
       # nodeSelector:
       #   legacy-nfs: "true"
       volumes:
       - name: nfs-mount-root
         hostPath:
-          path: /mnt/
+          path: /srv/nfs
+          type: DirectoryOrCreate
       - name: syskernelconfig 
         hostPath:
           path: /sys/kernel/config
@@ -72,7 +75,9 @@ spec:
       - name: dev 
         hostPath:
           path: /dev/
-      - name: nfs-exports
+      - name: varlibnfs
         hostPath:
-          path: /etc/exports.d
-          type: DirectoryOrCreate
+          path: /var/lib/nfs
+      - name: hostetc
+        hostPath:
+          path: /etc

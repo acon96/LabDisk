@@ -4,10 +4,11 @@ from kubernetes import client, config
 
 logger = logging.getLogger(__name__)
 
-def run_process(command):
-    process = subprocess.run(command, 
+def run_process(*args):
+    process = subprocess.run(args, 
         stdout=subprocess.PIPE, 
-        universal_newlines=True
+        universal_newlines=True,
+        check=True
     )
 
     return process.stdout.splitlines()

@@ -1,19 +1,25 @@
-import logging, uuid
+import sys
+import logging
+
 import kopf
 import kubernetes
 
 import config
 import util
 import nfs
+import lvm
 
 NODE_SELECTOR_ANNOTATION_KEY = "ragdollphysics.org/disk-node"
 SHARED_STORAGE_PATH_ANNOTATION_KEY = "ragdollphysics.org/shared-storage-path"
+FILESYSTEM_ANNOTATION_KEY = "ragdollphysics.org/filesystem"
 VOLUME_TYPE_NFS = "nfs"
 VOLUME_TYPE_ISCSI = "iscsi"
 VOLUME_TYPE_SHARED = "shared-nfs"
 
 util.setup_kube_client()
 logger = logging.getLogger("handler")
+
+config.setup()
 
 registered_storage_classes = []
 
@@ -26,9 +32,21 @@ def validate_and_register_storage_class(name, type):
         logger.error(f"Unrecognized LabDisk volume type: {type.lower()}")
         return
 
+    enabled_volume_types = []
+    if config.get().individual_volumes_enabled:
+        enabled_volume_types.extend([VOLUME_TYPE_NFS, VOLUME_TYPE_ISCSI])
+    
+    if config.get().shared_volumes_enabled:
+        enabled_volume_types.append(VOLUME_TYPE_SHARED)
+
+    if type.lower() not in enabled_volume_types:
+        logger.error(f"Ignoring storage class for type '{type}' because the subsystem that handles it is not enabled.")
+        return
+
     logger.info(f"Found valid LabDisk storage class {name}. Registering PVC Handlers.")
     registered_storage_classes.append(name)
 
+@kopf.on.create("storageclass", field="provisioner", value=config.get().provisioner_name)
 def new_storageclass(name, **kwargs):
     storage_api = kubernetes.client.StorageV1Api()
     sc = storage_api.read_storage_class(name)
@@ -37,12 +55,18 @@ def new_storageclass(name, **kwargs):
 
 @kopf.on.startup()
 async def operator_startup(**kwargs):
-    config.setup()
 
     if config.get().shared_volumes_enabled:
         logger.info("Starting shared NFS export...")
         # make sure the main nfs share that backs shared volumes is exported
         nfs.export_share(config.get().shared_nfs_root, config.get().access_cidr)
+    else:
+        logger.info("Shared volume subsystem will be disabled.")
+    
+    if config.get().individual_volumes_enabled:
+        logger.info("Starting individual volumes subsystem...")
+    else:
+        logger.info("Individual volume subsystem will be disabled.")
     
     storage_api = kubernetes.client.StorageV1Api()
     storage_classes = storage_api.list_storage_class()
@@ -53,9 +77,6 @@ async def operator_startup(**kwargs):
             continue
 
         validate_and_register_storage_class(metadata.name, sc.parameters["type"])
-
-    # register handler for new storageclasses
-    kopf.on.create("storageclass", field="provisioner", value=config.get().provisioner_name)(new_storageclass)
 
 
 def get_storage_class_params(name):
@@ -81,30 +102,6 @@ def validate_pvc_spec(spec, meta, update=False):
     
     return storage_class_params
 
-def create_persistent_volume_nfs(pv_name, access_modes, desired_capacity, nfs_server, volume_path, sc_name, volume_mode):
-
-    pv = {
-        "accessModes": access_modes,
-        "capacity": {"storage": desired_capacity},
-        # "mount_options": None,
-        "nfs": {
-            "path": volume_path,
-            "readOnly": False,
-            "server": nfs_server
-        },
-        "storageClassName": sc_name,
-        "volumeMode": volume_mode,
-    }
-
-    body = kubernetes.client.V1PersistentVolume(api_version='v1', spec=pv,
-        metadata=kubernetes.client.V1ObjectMeta(name=pv_name, labels={"app": "storage", "component": "lab-disk"}), 
-        kind="PersistentVolume"
-    )
-
-    core_api = kubernetes.client.CoreV1Api()
-    core_api.create_persistent_volume(body)
-
-
 @kopf.on.create("persistentvolumeclaim")
 def create_volume(meta, spec, **kwargs):
     storage_class_params = validate_pvc_spec(spec, meta)
@@ -122,6 +119,8 @@ def create_volume(meta, spec, **kwargs):
     desired_volume_size = spec["resources"].get("limits", {}).get("storage", spec["resources"].get("requests", {}).get("storage"))
     access_modes = spec["accessModes"]
     volume_type = storage_class_params["type"]
+    pv_name = f"pvc-{meta.uid}"
+    fs_type = meta.annotations.get(FILESYSTEM_ANNOTATION_KEY, "xfs")
 
     if not desired_volume_size:
         raise kopf.PermanentError("No volume size provided")
@@ -139,16 +138,15 @@ def create_volume(meta, spec, **kwargs):
             raise kopf.PermanentError(f"Cannot use storage path outside of the shared NFS root! (storage path '{storage_path}')")
 
         volume_directory = f"{config.get().shared_nfs_root}/{storage_path}"
-        util.run_process(["mkdir", "-p", volume_directory])
+        util.run_process("mkdir", "-p", volume_directory)
 
-        # todo: create the pv object using the main nfs share and the subpath for this volume
-        pv_name = f"pvc-{uuid.uuid4()}"
-        create_persistent_volume_nfs(pv_name, access_modes, desired_volume_size, config.get().current_node_ip, volume_directory, spec["storageClassName"], spec["volumeMode"])
+        # create the pv object using the main nfs share and the subpath for this volume
+        nfs.create_persistent_volume(pv_name, access_modes, desired_volume_size, config.get().current_node_ip, volume_directory, spec["storageClassName"], spec["volumeMode"])
     else:
         if not config.get().individual_volumes_enabled:
-            raise kopf.PermanentError("This instance of LabDisk does not have individual volumes configured")
+            raise kopf.PermanentError("This instance of LabDisk does not have individual volumes configured")      
 
-        # todo: provision lvm volume using lvm2py for individual volumes
+        lvm_group = config.get().lvm_group
 
         if volume_type == VOLUME_TYPE_ISCSI:
             # todo: setup iscsi exports using rtstlib-fb
@@ -156,10 +154,16 @@ def create_volume(meta, spec, **kwargs):
             raise NotImplementedError()
 
         if volume_type == VOLUME_TYPE_NFS:
-            # todo: locally mount lvm volume where NFS can access it
-            # todo: setup nfs share exports by writing to /etc/exports directly and running exportfs
-            # todo: create the pv object using the specific NFS share
-            raise NotImplementedError()
+            mount_point = f"/srv/nfs/{pv_name}"
+
+            # provision lvm volume then locally mount it where NFS can access it and the set up a NFS share
+            lvm.create_volume(lvm_group, pv_name, fs_type, desired_volume_size, mount_point)
+
+            # export the share
+            nfs.export_share(mount_point, config.get().access_cidr)
+
+            # create the pv object using the share we just exported
+            nfs.create_persistent_volume(pv_name, access_modes, desired_volume_size, config.get().current_node_ip, mount_point, spec["storageClassName"], spec["volumeMode"])
 
     logger.info(f"Successfully provisioned volume for claim {meta.name}")
 
