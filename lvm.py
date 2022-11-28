@@ -1,6 +1,8 @@
 import logging
 import time
 import json
+import os
+from contextlib import suppress
 
 import util
 import kopf
@@ -37,7 +39,8 @@ def create_volume(pool_name, volume_name, fs_type, volume_size, mount_point=None
         unroll.append("mkfs")
 
         if mount_point:
-            util.run_process("mkdir", "-p", mount_point)
+            with suppress(FileExistsError):
+                os.mkdir(mount_point)
             unroll.append("mkdir")
 
             util.run_process("mount", "-t", fs_type, block_device, mount_point)
@@ -54,7 +57,7 @@ def create_volume(pool_name, volume_name, fs_type, volume_size, mount_point=None
                 util.run_process("umount", mount_point)
             
             if "mkdir" in unroll:
-                util.run_process("rm", "-rf", mount_point)
+                os.rmdir(mount_point)
 
             if "lvcreate" in unroll:
                 util.run_process("lvremove", f"{pool_name}/{volume_name}", "--yes")

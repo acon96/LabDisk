@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: test-iscsi
+  namespace: default
+  labels:
+    app: test
+  annotations:
+    ragdollphysics.org/disk-node: k8s-dev
+spec:
+  storageClassName: lab-disk-iscsi
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 512Mi

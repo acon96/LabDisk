@@ -26,4 +26,6 @@ spec:
       volumes:
         - name: test-volume
           persistentVolumeClaim:
-            claimName: test-lvm-nfs
+            # claimName: test-lvm-nfs
+            claimName: test-iscsi
+

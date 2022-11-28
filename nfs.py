@@ -5,9 +5,8 @@ import subprocess
 import kubernetes
 
 import config
+from config import Constants
 import util
-
-NFS_MOUNT_FLAGS = "rw,sync,no_subtree_check,insecure,no_root_squash"
 
 logger = logging.getLogger(__name__)
 
@@ -20,7 +19,9 @@ def get_exported_filesystems():
     for line in mounts:
         found = re.findall(r"(.*?)[^\S]+(\d.*)", line)
         if len(found) == 1:
-            result.append(found[0])
+            mount, clients = found[0]
+            split_clients = clients.split(",")
+            result.extend([(mount, client) for client in split_clients])
         else:
             raise RuntimeError(f"failed to parse mount: {line}")
 
@@ -34,7 +35,7 @@ def export_share(mount, client):
 
     logger.info(f"Exporting fs '{mount}'")
     try:
-        util.run_process("exportfs", "-o", NFS_MOUNT_FLAGS, f"{client}:{mount}")
+        util.run_process("exportfs", "-o", Constants.NFS_MOUNT_FLAGS, f"{client}:{mount}")
     except subprocess.CalledProcessError as ex:
         # exportfs doesn't like us running from inside a container
         # check after we exported it to see if to happened or not and then error out then
@@ -42,7 +43,7 @@ def export_share(mount, client):
             raise ex
 
 
-def create_persistent_volume(pv_name, access_modes, desired_capacity, nfs_server, volume_path, sc_name, volume_mode):
+def create_persistent_volume(pv_name, node_name, access_modes, desired_capacity, nfs_server, volume_path, sc_name, volume_mode):
 
     pv = {
         "accessModes": access_modes,
@@ -58,7 +59,11 @@ def create_persistent_volume(pv_name, access_modes, desired_capacity, nfs_server
     }
 
     body = kubernetes.client.V1PersistentVolume(api_version='v1', spec=pv,
-        metadata=kubernetes.client.V1ObjectMeta(name=pv_name, labels={"app": "storage", "component": "lab-disk"}), 
+        metadata=kubernetes.client.V1ObjectMeta(
+            name=pv_name, 
+            labels={"app": "storage", "component": "lab-disk"},
+            annotations={Constants.PV_NODE_ANNOTATION_KEY: node_name}
+        ), 
         kind="PersistentVolume"
     )
 

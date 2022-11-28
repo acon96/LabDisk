@@ -4,6 +4,18 @@ import kubernetes
 
 logger = logging.getLogger(__name__)
 
+class Constants:
+    NODE_SELECTOR_ANNOTATION_KEY = "ragdollphysics.org/disk-node"
+    SHARED_STORAGE_PATH_ANNOTATION_KEY = "ragdollphysics.org/shared-storage-path"
+    FILESYSTEM_ANNOTATION_KEY = "ragdollphysics.org/filesystem"
+    VOLUME_TYPE_NFS = "nfs"
+    VOLUME_TYPE_ISCSI = "iscsi"
+    VOLUME_TYPE_SHARED = "shared-nfs"
+
+    NFS_MOUNT_FLAGS = "rw,sync,no_subtree_check,insecure,no_root_squash"
+
+    PV_NODE_ANNOTATION_KEY = "ragdollphysics.org/lab-disk-node"
+
 class Config:
     def __init__(self):
         configmap_name = os.environ.get("LAB_DISK_CONFIGMAP")
@@ -22,7 +34,9 @@ class Config:
 
         self.lvm_group = config.get("lvm_group")
         self.shared_nfs_root = config.get("shared_nfs_root")
-        self.access_cidr = config.get("access_cidr", "0.0.0.0/0")      
+        self.nfs_access_cidr = config.get("nfs_access_cidr", "0.0.0.0/0")
+        self.iscsi_portal_addr = config.get("iscsi_portal_addr", "0.0.0.0:3260")
+        self.iscsi_portal_port = self.iscsi_portal_addr.split(":")[1]
 
         self.current_node_ip = os.environ.get("LAB_DISK_NODE_IP")
         if not self.current_node_ip:

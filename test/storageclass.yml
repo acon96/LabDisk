@@ -17,3 +17,13 @@ parameters:
   type: nfs
 reclaimPolicy: Retain
 allowVolumeExpansion: true
+---
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: lab-disk-iscsi
+provisioner: ragdollphysics.org/lab-disk
+parameters:
+  type: iscsi
+reclaimPolicy: Retain
+allowVolumeExpansion: true
