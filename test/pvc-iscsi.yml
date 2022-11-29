@@ -14,3 +14,20 @@ spec:
   resources:
     requests:
       storage: 512Mi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: test-another-iscis-volume
+  namespace: default
+  labels:
+    app: test
+  annotations:
+    ragdollphysics.org/disk-node: k8s-dev
+spec:
+  storageClassName: lab-disk-iscsi
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 100Mi

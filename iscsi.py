@@ -2,7 +2,7 @@ import os
 from contextlib import suppress
 
 import kubernetes
-from rtslib_fb import FabricModule, Target, TPG, RTSRoot, BlockStorageObject, LUN, MappedLUN, RTSLibError
+from rtslib_fb import FabricModule, Target, TPG, RTSRoot, BlockStorageObject, LUN, MappedLUN, RTSLibError, RTSLibNotInCFS
 
 from util import run_process
 from config import Constants
@@ -24,7 +24,7 @@ def create_lun_from_volume(pool_name, vol_name):
     so_name = f"{pool_name}:{vol_name}"
     try:
         so = BlockStorageObject(so_name)
-    except RTSLibError:
+    except RTSLibNotInCFS:
         so = BlockStorageObject(so_name, dev=device_path)
         so.wwn = vol_serial
 
@@ -42,8 +42,13 @@ def create_lun_from_volume(pool_name, vol_name):
 def export_disk_for_initiator(initiator_wwn, pool_name, vol_name):
     node_acl = tpg.node_acl(initiator_wwn)
     lun = create_lun_from_volume(pool_name, vol_name)
-    node_acl.mapped_lun(lun.lun, lun)
-    update_iscsi_config()
+
+    # only create mappedlun if it doesn't already exist
+    try:
+        MappedLUN(node_acl, lun.lun)
+    except RTSLibNotInCFS:
+        MappedLUN(node_acl, lun.lun, lun)
+        update_iscsi_config()
 
     return lun.lun
 

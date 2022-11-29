@@ -11,8 +11,8 @@ metadata:
   namespace: kube-system
 rules:
   - apiGroups: [""]
-    resources: ["persistentvolumes"]
-    verbs: ["get", "list", "watch", "create", "delete"]
+    resources: ["persistentvolumes", "persistentvolumes/status"]
+    verbs: ["get", "list", "watch", "create", "delete", "patch"]
   - apiGroups: [""]
     resources: ["persistentvolumeclaims", "persistentvolumeclaims/status"]
     verbs: ["get", "list", "watch", "update", "patch"]

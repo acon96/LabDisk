@@ -13,6 +13,10 @@ import lvm
 import iscsi
 
 util.setup_kube_client()
+
+logging.basicConfig(level=logging.DEBUG)
+logging.getLogger("kopf").setLevel(logging.INFO)
+logging.getLogger("kubernetes").setLevel(logging.INFO)
 logger = logging.getLogger("handler")
 
 config.setup()
@@ -73,37 +77,40 @@ async def operator_startup(**kwargs):
     if config.get().individual_volumes_enabled:
         logger.info("Starting individual volumes subsystem...")
         iscsi.init_iscsi(config.get().current_node_name, config.get().iscsi_portal_addr, None)
-       
-        existing_volumes = core_api.list_persistent_volume()
-        for persistent_volume in existing_volumes.items:
-            pv_name = persistent_volume.metadata.name
-            storage_class = persistent_volume.spec.storage_class_name
-
-            # make sure it is a storage class that we manage
-            if storage_class not in registered_storage_classes:
-                logger.debug(f"Volume has ")
-                continue
-
-            # only process volumes on this node
-            asigned_node = persistent_volume.metadata.annotations[Constants.PV_NODE_ANNOTATION_KEY]
-            if asigned_node != config.get().current_node_name:
-                continue
-
-            sc_params = get_storage_class_params(storage_class)
-            volume_type = sc_params["type"]
-
-            # re-mount individual NFS exports
-            if volume_type == Constants.VOLUME_TYPE_NFS:
-                mount_point = f"/srv/nfs/{pv_name}"
-                logger.debug(f"Exporting NFS share for {mount_point}")
-                nfs.export_share(mount_point, config.get().nfs_access_cidr)
-            elif volume_type == Constants.VOLUME_TYPE_ISCSI:
-                lvm_group = config.get().lvm_group
-                logger.debug(f"Exporting iSCSI share for {lvm_group}:{pv_name}")
-                iscsi.export_disk(lvm_group, pv_name)
-                
     else:
         logger.info("Individual volume subsystem will be disabled.")
+
+
+@kopf.on.resume("persistentvolume")
+def register_existing_volumes(spec, meta, **kwargs):
+    storage_class = spec["storageClassName"]
+    pv_name = meta["name"]
+
+    # make sure it is a storage class that we manage
+    if storage_class not in registered_storage_classes:
+        logger.debug(f"Not registering volume {pv_name} because it is not a lab-disk volume")
+        return
+
+    # only process volumes on this node
+    asigned_node = meta["annotations"].get(Constants.PV_NODE_ANNOTATION_KEY, "")
+    if asigned_node != config.get().current_node_name:
+        logger.debug(f"Not registering volume {pv_name} because it is served by a different node")
+        return
+
+    sc_params = get_storage_class_params(storage_class)
+    volume_type = sc_params["type"]
+
+    # re-mount individual NFS exports
+    if volume_type == Constants.VOLUME_TYPE_NFS:
+        mount_point = f"/srv/nfs/{pv_name}"
+        logger.debug(f"Exporting NFS share for {mount_point}")
+        nfs.export_share(mount_point, config.get().nfs_access_cidr)
+    elif volume_type == Constants.VOLUME_TYPE_ISCSI:
+        lvm_group = config.get().lvm_group
+        logger.debug(f"Exporting iSCSI share for {lvm_group}:{pv_name}")
+        iscsi.export_disk(lvm_group, pv_name)
+
+    logger.info(f"Successfully registered existing pv '{pv_name}'")
 
 
 storage_class_params_cache = {}
