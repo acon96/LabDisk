@@ -7,11 +7,27 @@ metadata:
     app: test
   annotations:
     ragdollphysics.org/disk-node: k8s-dev
-    ragdollphysics.org/shared-storage-path: "testpath"
 spec:
   storageClassName: lab-disk-nfs
   accessModes:
     - ReadWriteOnce
   resources:
     requests:
-      storage: 512Mi
+      storage: 100Mi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: test-lvm-nfs-delete
+  namespace: default
+  labels:
+    app: test
+  annotations:
+    ragdollphysics.org/disk-node: k8s-dev
+spec:
+  storageClassName: lab-disk-nfs-delete
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 100Mi

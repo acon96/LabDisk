@@ -42,6 +42,19 @@ def export_share(mount, client):
         if ex.returncode == 1 and (mount, client) not in get_exported_filesystems():
             raise ex
 
+def un_export_share(mount, client):
+    if (mount, client) not in get_exported_filesystems():
+        return # share already unmounted
+
+    logger.info(f"Unmounting fs '{mount}'")
+    try:
+        util.run_process("exportfs", "-u", f"{client}:{mount}")
+    except subprocess.CalledProcessError as ex:
+        # exportfs doesn't like us running from inside a container
+        # check after we exported it to see if to happened or not and then error out then
+        if ex.returncode == 1 and (mount, client) in get_exported_filesystems():
+            raise ex
+
 
 def create_persistent_volume(pv_name, node_name, access_modes, desired_capacity, nfs_server, volume_path, sc_name, volume_mode):
 

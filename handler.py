@@ -65,8 +65,6 @@ async def operator_startup(**kwargs):
 
         validate_and_register_storage_class(metadata.name, sc.parameters["type"])
 
-    core_api = kubernetes.client.CoreV1Api()
-
     if config.get().shared_volumes_enabled:
         logger.info("Starting shared NFS export...")
         # make sure the main nfs share that backs shared volumes is exported
@@ -217,10 +215,46 @@ def create_volume(meta, spec, **kwargs):
     logger.info(f"Successfully provisioned volume for claim {meta.name}")
 
 @kopf.on.update("persistentvolumeclaim")
-def update_volume(spec, meta, old, new, diff, **kwargs):
+def update_volume_claim(spec, meta, old, new, diff, **kwargs):
     validate_pvc_spec(spec, meta, update=True)
 
 
 @kopf.on.delete("persistentvolumeclaim")
-def delete_volume(spec, **kwargs):
-    pass
+def delete_volume_claim(spec, meta, **kwargs):
+    storage_class = spec["storageClassName"]
+    sc_params = get_storage_class_params(storage_class)
+    volume_name = spec["volumeName"]
+    retain_volume = sc_params["reclaim_policy"] == "Retain"
+
+    if retain_volume:
+        logger.info(f"Retaining PV after deleting PVC '{meta['name']}")
+    else:
+        logger.info(f"Deleting PV after deleting PVC '{meta['name']}")
+
+        core_api = kubernetes.client.CoreV1Api()
+        core_api.delete_persistent_volume(volume_name)
+
+
+@kopf.on.delete("persistentvolume")
+def delete_volume(spec, meta, **kwargs):
+    storage_class = spec["storageClassName"]
+    sc_params = get_storage_class_params(storage_class)
+    volume_type = sc_params["type"]
+    pv_name = meta["name"]
+    lvm_group = config.get().lvm_group
+
+    if volume_type == Constants.VOLUME_TYPE_SHARED:
+        return # nothing to do for shared volumes
+
+    elif volume_type == Constants.VOLUME_TYPE_NFS:
+        mount_point = f"/srv/nfs/{pv_name}"
+        nfs.un_export_share(mount_point, config.get().nfs_access_cidr)
+
+        # unmount the share location
+        lvm.unmount_volume(mount_point, lvm_group, pv_name)
+        
+    elif volume_type == Constants.VOLUME_TYPE_ISCSI:
+        iscsi.un_export_disk(lvm_group, pv_name)
+
+    # delete the volume (if destructive actions are on)
+    lvm.delete_volume(lvm_group, pv_name)

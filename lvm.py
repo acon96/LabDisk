@@ -5,6 +5,7 @@ import os
 from contextlib import suppress
 
 import util
+import config
 import kopf
 
 logger = logging.getLogger(__name__)
@@ -59,7 +60,7 @@ def create_volume(pool_name, volume_name, fs_type, volume_size, mount_point=None
             if "mkdir" in unroll:
                 os.rmdir(mount_point)
 
-            if "lvcreate" in unroll:
+            if "lvcreate" in unroll and config.get().allow_destructive_actions:
                 util.run_process("lvremove", f"{pool_name}/{volume_name}", "--yes")
         except Exception as ex2:
             msg = "Fatal Error encountered unrolling volume creation. Disk will be left in a intermediate state!"
@@ -68,3 +69,32 @@ def create_volume(pool_name, volume_name, fs_type, volume_size, mount_point=None
 
         logger.warn("Failed to create volume!", exc_info=ex)
         raise kopf.TemporaryError(f"Error creating volume: {repr(ex)}")
+
+
+def unmount_volume(mount_point, pool_name, volume_name):
+    # unmount right now
+    try:
+        util.run_process("umount", mount_point)
+    except:
+        pass
+
+    # clean up mount point
+    try:
+        os.rmdir(mount_point)
+    except:
+        pass
+    
+    # remove any entires in fstab
+    block_device = f"/dev/{pool_name}/{volume_name}"
+
+    with open("/app/hostetc/fstab", "r") as f:
+        lines = f.readlines()
+
+    with open("/app/hostetc/fstab", "w") as f:
+        for line in lines:
+            if not line.lstrip().startswith(block_device):
+                f.write(line)
+
+def delete_volume(pool_name, volume_name):
+    if config.get().allow_destructive_actions:
+        util.run_process("lvremove", f"{pool_name}/{volume_name}", "--yes")

@@ -21,9 +21,29 @@ allowVolumeExpansion: true
 apiVersion: storage.k8s.io/v1
 kind: StorageClass
 metadata:
+  name: lab-disk-nfs-delete
+provisioner: ragdollphysics.org/lab-disk
+parameters:
+  type: nfs
+reclaimPolicy: Delete
+allowVolumeExpansion: true
+---
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
   name: lab-disk-iscsi
 provisioner: ragdollphysics.org/lab-disk
 parameters:
   type: iscsi
 reclaimPolicy: Retain
+allowVolumeExpansion: true
+---
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: lab-disk-iscsi-delete
+provisioner: ragdollphysics.org/lab-disk
+parameters:
+  type: iscsi
+reclaimPolicy: Delete
 allowVolumeExpansion: true

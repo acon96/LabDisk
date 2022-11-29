@@ -13,19 +13,19 @@ spec:
     - ReadWriteOnce
   resources:
     requests:
-      storage: 512Mi
+      storage: 100Mi
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: test-another-iscis-volume
+  name: test-iscsi-delete
   namespace: default
   labels:
     app: test
   annotations:
     ragdollphysics.org/disk-node: k8s-dev
 spec:
-  storageClassName: lab-disk-iscsi
+  storageClassName: lab-disk-iscsi-delete
   accessModes:
     - ReadWriteOnce
   resources:

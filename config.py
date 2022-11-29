@@ -50,6 +50,13 @@ class Config:
         logger.info(f"Shared Volumes Enabled: {self.shared_volumes_enabled}")
         logger.info(f"Individual Volumes Enabled: {self.individual_volumes_enabled}")
 
+        self.allow_destructive_actions = config.get("allow_destructive_actions", "false").lower() == "true"
+
+        if self.allow_destructive_actions:
+            logger.info("-------- WARNING --------")
+            logger.info("Destructive actions are turned ON. This means that the application can potentially delete/destroy data on your disks.")
+            logger.info("USE AT YOUR OWN RISK")
+
 
 # global config object
 config = None
