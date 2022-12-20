@@ -27,9 +27,12 @@ registered_storage_classes = []
 def api_login(**kwargs):
     return kopf.login_via_client(**kwargs)
 
-def validate_and_register_storage_class(name, type):
-    if type.lower() not in [Constants.VOLUME_TYPE_ISCSI, Constants.VOLUME_TYPE_NFS, Constants.VOLUME_TYPE_SHARED]:
-        logger.error(f"Unrecognized LabDisk volume type: {type.lower()}")
+def validate_and_register_storage_class(name, sc):
+    sc_type = sc.parameters.get("type", "")
+    sc_nodes = sc.parameters.get("nodes", "").split(",")
+
+    if sc_type.lower() not in [Constants.VOLUME_TYPE_ISCSI, Constants.VOLUME_TYPE_NFS, Constants.VOLUME_TYPE_SHARED]:
+        logger.error(f"Unrecognized LabDisk volume type: {sc_type.lower()}")
         return
 
     enabled_volume_types = []
@@ -39,8 +42,12 @@ def validate_and_register_storage_class(name, type):
     if config.get().shared_volumes_enabled:
         enabled_volume_types.append(Constants.VOLUME_TYPE_SHARED)
 
-    if type.lower() not in enabled_volume_types:
-        logger.error(f"Ignoring storage class for type '{type}' because the subsystem that handles it is not enabled.")
+    if sc_type.lower() not in enabled_volume_types:
+        logger.warning(f"Ignoring storage class '{name}' with type '{sc_type}' because the subsystem that handles it is not enabled.")
+        return
+
+    if config.get().current_node_name not in sc_nodes:
+        logger.info(f"Ignoring storage class '{name}' because it does not apply to this node.")
         return
 
     logger.info(f"Found valid LabDisk storage class {name}. Registering PVC Handlers.")
@@ -50,8 +57,7 @@ def validate_and_register_storage_class(name, type):
 def new_storageclass(name, **kwargs):
     storage_api = kubernetes.client.StorageV1Api()
     sc = storage_api.read_storage_class(name)
-
-    validate_and_register_storage_class(name, sc.parameters['type'])
+    validate_and_register_storage_class(name, sc)
 
 @kopf.on.startup()
 async def operator_startup(**kwargs):
@@ -63,7 +69,7 @@ async def operator_startup(**kwargs):
             logger.debug(f"Ignoring storage class {metadata.name}...")
             continue
 
-        validate_and_register_storage_class(metadata.name, sc.parameters["type"])
+        validate_and_register_storage_class(metadata.name, sc)
 
     if config.get().shared_volumes_enabled:
         logger.info("Starting shared NFS export...")
@@ -217,6 +223,15 @@ def create_volume(meta, spec, **kwargs):
 @kopf.on.update("persistentvolumeclaim")
 def update_volume_claim(spec, meta, old, new, diff, **kwargs):
     validate_pvc_spec(spec, meta, update=True)
+
+    old_volume_size = old["resources"].get("limits", {}).get("storage", spec["resources"].get("requests", {}).get("storage"))
+    new_volume_size = new["resources"].get("limits", {}).get("storage", spec["resources"].get("requests", {}).get("storage"))
+
+    lvm_group = config.get().lvm_group
+    pv_name = f"pvc-{meta.uid}"
+
+    if old_volume_size != new_volume_size:
+        lvm.resize_volume(lvm_group, pv_name, old_volume_size, new_volume_size)
 
 
 @kopf.on.delete("persistentvolumeclaim")
