@@ -34,6 +34,7 @@ class Config:
 
         self.lvm_group = config.get("lvm_group")
         self.shared_nfs_root = config.get("shared_nfs_root")
+        self.shared_nfs_nodes = config.get("shared_nfs_nodes")
         self.nfs_access_cidr = config.get("nfs_access_cidr", "0.0.0.0/0")
         self.iscsi_portal_addr = config.get("iscsi_portal_addr", "0.0.0.0:3260")
         self.iscsi_portal_port = self.iscsi_portal_addr.split(":")[1]
@@ -44,7 +45,7 @@ class Config:
 
         self.current_node_name = os.environ.get("LAB_DISK_NODE_NAME", self.current_node_ip)
 
-        self.shared_volumes_enabled = self.shared_nfs_root != None
+        self.shared_volumes_enabled = (self.shared_nfs_root != None and shared_nfs_nodes != None and current_node_name in shared_nfs_nodes)
         self.individual_volumes_enabled = self.lvm_group != None
 
         logger.info(f"Shared Volumes Enabled: {self.shared_volumes_enabled}")
