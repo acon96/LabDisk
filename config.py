@@ -5,16 +5,22 @@ import kubernetes
 logger = logging.getLogger(__name__)
 
 class Constants:
-    NODE_SELECTOR_ANNOTATION_KEY = "ragdollphysics.org/disk-node"
-    SHARED_STORAGE_PATH_ANNOTATION_KEY = "ragdollphysics.org/shared-storage-path"
-    FILESYSTEM_ANNOTATION_KEY = "ragdollphysics.org/filesystem"
+    PERSISTENCE_ANNOTATION_KEY_PREFIX = "ragdollphysics.org"
+    NODE_SELECTOR_ANNOTATION_KEY = f"{PERSISTENCE_ANNOTATION_KEY_PREFIX}/disk-node"
+    SHARED_STORAGE_PATH_ANNOTATION_KEY = f"{PERSISTENCE_ANNOTATION_KEY_PREFIX}/shared-storage-path"
+    FILESYSTEM_ANNOTATION_KEY = f"{PERSISTENCE_ANNOTATION_KEY_PREFIX}/filesystem"
+    MIRROR_ANNOTATION_KEY = f"{PERSISTENCE_ANNOTATION_KEY_PREFIX}/mirror"
+    PVC_FINALIZER_KEY = f"{PERSISTENCE_ANNOTATION_KEY_PREFIX}/disk-finalizer"
+    PV_ASSIGNED_NODE_ANNOTATION_KEY = f"{PERSISTENCE_ANNOTATION_KEY_PREFIX}/lab-disk-node"
+
     VOLUME_TYPE_NFS = "nfs"
     VOLUME_TYPE_ISCSI = "iscsi"
     VOLUME_TYPE_SHARED = "shared-nfs"
 
     NFS_MOUNT_FLAGS = "rw,sync,no_subtree_check,insecure,no_root_squash"
 
-    PV_NODE_ANNOTATION_KEY = "ragdollphysics.org/lab-disk-node"
+    # support more raid modes?
+    LVM_RAID1_FLAGS = [ "--type", "raid1", "--mirrors", "1", "--nosync" ]
 
 class Config:
     def __init__(self):

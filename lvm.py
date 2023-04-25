@@ -20,7 +20,7 @@ def volume_exists(pool_name, volume_name):
 
     return False
 
-def create_volume(pool_name, volume_name, fs_type, volume_size, mount_point=None):
+def create_volume(pool_name, volume_name, fs_type, mirror_disk, volume_size, mount_point=None):
     if volume_exists(pool_name, volume_name):
         return
 
@@ -30,7 +30,11 @@ def create_volume(pool_name, volume_name, fs_type, volume_size, mount_point=None
     unroll = []
 
     try:
-        util.run_process("lvcreate", "--zero", "n", "--size", formatted_volume_size, "--name", volume_name, pool_name)
+        create_cmd = [ "lvcreate", "--zero", "n", "--size", formatted_volume_size, "--name", volume_name, pool_name ]
+        if mirror_disk:
+            create_cmd.extend(config.Constants.LVM_RAID1_FLAGS)
+
+        util.run_process(*create_cmd)
         unroll.append("lvcreate")
 
         # wait for the device to be created
@@ -40,8 +44,7 @@ def create_volume(pool_name, volume_name, fs_type, volume_size, mount_point=None
         unroll.append("mkfs")
 
         if mount_point:
-            with suppress(FileExistsError):
-                os.mkdir(mount_point)
+            os.makedirs(mount_point, exist_ok=True)
             unroll.append("mkdir")
 
             util.run_process("mount", "-t", fs_type, block_device, mount_point)

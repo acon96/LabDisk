@@ -57,3 +57,6 @@ spec:
     requests:
       storage: 100Mi
 ```
+
+# Todo
+[ ] Implement CHAP authentication for iSCIS disks. Auto generate passwords if not provided

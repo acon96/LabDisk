@@ -31,3 +31,21 @@ spec:
   resources:
     requests:
       storage: 100Mi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: test-iscsi-mirrored
+  namespace: default
+  labels:
+    app: test
+  annotations:
+    ragdollphysics.org/disk-node: k8s-dev
+    ragdollphysics.org/mirror: "true"
+spec:
+  storageClassName: lab-disk-iscsi
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 100Mi
