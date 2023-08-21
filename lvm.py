@@ -135,3 +135,43 @@ def unmount_volume(mount_point, pool_name, volume_name):
 def delete_volume(pool_name, volume_name):
     if config.get().allow_destructive_actions:
         util.run_process("lvremove", f"{pool_name}/{volume_name}", "--yes")
+
+def import_volume(pool_name, volume_name, mount_point=None):
+    if not volume_exists(pool_name, volume_name):
+        raise kopf.PermanentError(f"Cannot find lvm volume to import named '{volume_name}'")
+    
+    if mount_point:
+        unroll = []
+        block_device = f"/dev/{pool_name}/{volume_name}"
+        fs_type = util.run_process("blkid", "-o", "value", "-s", "TYPE", block_device)
+        try:
+            os.makedirs(mount_point, exist_ok=True)
+            unroll.append("mkdir")
+
+            util.run_process("mount", "-t", fs_type, block_device, mount_point)
+            unroll.append("mount")
+
+            # save our mount
+            options = f"defaults,noatime"
+            with open("/app/hostetc/fstab", "a") as f:
+                f.write(f"{block_device} {mount_point} {fs_type} {options} 0 0\n") # dump and fsck disabled
+
+        except Exception as ex:
+            try:
+                if "mount" in unroll:
+                    util.run_process("umount", mount_point)
+                
+                if "mkdir" in unroll:
+                    os.rmdir(mount_point)
+
+                if "lvcreate" in unroll and config.get().allow_destructive_actions:
+                    util.run_process("lvremove", f"{pool_name}/{volume_name}", "--yes")
+            except Exception as ex2:
+                msg = "Fatal Error encountered unrolling volume creation. Disk will be left in a intermediate state!"
+                logger.error(msg, exc_info=ex2)
+                raise kopf.PermanentError(msg)
+
+            logger.warn("Failed to create volume!", exc_info=ex)
+            raise kopf.TemporaryError(f"Error creating volume: {repr(ex)}")
+    
+    return volume_name

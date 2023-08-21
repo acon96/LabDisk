@@ -174,6 +174,7 @@ def create_volume(meta: Meta, spec: Spec, **kwargs):
     pv_name = f"pvc-{meta.uid}"
     fs_type = meta.annotations.get(Constants.FILESYSTEM_ANNOTATION_KEY, "xfs")
     mirror_disk = Constants.MIRROR_ANNOTATION_KEY in meta.annotations
+    imported_pv_name = meta.annotations.get(Constants.IMPORTED_LVM_NAME_ANNOTATION_KEY, "")
 
     if not desired_volume_size:
         raise kopf.PermanentError("No volume size provided")
@@ -202,8 +203,12 @@ def create_volume(meta: Meta, spec: Spec, **kwargs):
         lvm_group = config.get().lvm_group
 
         if volume_type == Constants.VOLUME_TYPE_ISCSI:
-            # provision lvm volume
-            lvm.create_volume(lvm_group, pv_name, fs_type, mirror_disk, desired_volume_size)
+            if config.get().import_mode:
+                # import lvm volume
+                pv_name = lvm.import_volume(lvm_group, imported_pv_name)
+            else:
+                # provision lvm volume
+                lvm.create_volume(lvm_group, pv_name, fs_type, mirror_disk, desired_volume_size)
 
             # setup iscsi exports using rtstlib-fb
             iscsi_lun = iscsi.export_disk(lvm_group, pv_name)
@@ -216,8 +221,12 @@ def create_volume(meta: Meta, spec: Spec, **kwargs):
         if volume_type == Constants.VOLUME_TYPE_NFS:
             mount_point = f"/srv/nfs/{pv_name}"
 
-            # provision lvm volume then locally mount it where NFS can access it and the set up a NFS share
-            lvm.create_volume(lvm_group, pv_name, fs_type, mirror_disk, desired_volume_size, mount_point)
+            if config.get().import_mode:
+                # import lvm volume then mount it for NFS exporting
+                pv_name = lvm.import_volume(lvm_group, imported_pv_name, mount_point)
+            else:
+                # provision lvm volume then locally mount it where NFS can access it and the set up a NFS share
+                lvm.create_volume(lvm_group, pv_name, fs_type, mirror_disk, desired_volume_size, mount_point)
 
             # export the share
             nfs.export_share(mount_point, config.get().nfs_access_cidr)

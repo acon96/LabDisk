@@ -1,4 +1,5 @@
 import os
+import sys
 import logging
 import kubernetes
 
@@ -12,6 +13,7 @@ class Constants:
     MIRROR_ANNOTATION_KEY = f"{PERSISTENCE_ANNOTATION_KEY_PREFIX}/mirror"
     PVC_FINALIZER_KEY = f"{PERSISTENCE_ANNOTATION_KEY_PREFIX}/disk-finalizer"
     PV_ASSIGNED_NODE_ANNOTATION_KEY = f"{PERSISTENCE_ANNOTATION_KEY_PREFIX}/lab-disk-node"
+    IMPORTED_LVM_NAME_ANNOTATION_KEY = f"{PERSISTENCE_ANNOTATION_KEY_PREFIX}/lvm-disk-to-import"
 
     VOLUME_TYPE_NFS = "nfs"
     VOLUME_TYPE_ISCSI = "iscsi"
@@ -51,7 +53,7 @@ class Config:
 
         self.current_node_name = os.environ.get("LAB_DISK_NODE_NAME", self.current_node_ip)
 
-        self.shared_volumes_enabled = (self.shared_nfs_root != None and shared_nfs_nodes != None and current_node_name in shared_nfs_nodes)
+        self.shared_volumes_enabled = (self.shared_nfs_root != None and self.shared_nfs_nodes != None and self.current_node_name in self.shared_nfs_nodes.split(","))
         self.individual_volumes_enabled = self.lvm_group != None
 
         logger.info(f"Shared Volumes Enabled: {self.shared_volumes_enabled}")
@@ -63,6 +65,12 @@ class Config:
             logger.info("-------- WARNING --------")
             logger.info("Destructive actions are turned ON. This means that the application can potentially delete/destroy data on your disks.")
             logger.info("USE AT YOUR OWN RISK")
+
+        self.import_mode = False
+        if os.environ.get("LAB_DISK_IMPORT_MODE", "false").lower() == "true":
+            logger.info("LabDisk is in 'Import' mode!")
+            logger.info("It will not create any new LVM disks and will only match up new PVCs with existing disks")
+            self.import_mode = True
 
 
 # global config object
