@@ -174,7 +174,7 @@ def create_volume(meta: Meta, spec: Spec, **kwargs):
     pv_name = f"pvc-{meta.uid}"
     fs_type = meta.annotations.get(Constants.FILESYSTEM_ANNOTATION_KEY, "xfs")
     mirror_disk = Constants.MIRROR_ANNOTATION_KEY in meta.annotations
-    imported_pv_name = meta.annotations.get(Constants.IMPORTED_LVM_NAME_ANNOTATION_KEY, "")
+    imported_pv_name = meta.annotations.get(Constants.IMPORTED_LVM_NAME_ANNOTATION_KEY)
 
     if not desired_volume_size:
         raise kopf.PermanentError("No volume size provided")

@@ -2,6 +2,8 @@
 
 LabDisk is a Kubernetes dynamic storage provisioner that provides automatic provisioning of NFS and iSCIS volumes backed by an LVM pool.
 
+The goal of this project is to provide a persistent volume provisioner for Kubernetes that can be run in a "lab" or "homelab" environment. Persistent Storage for Kubernetes is difficult to set up if you are not using a cloud distribution or running a CSI package like Longhorn or OpenEBS.
+
 ## Installation
 
 1. Install the pre-requisites on every node in the Kubernetes cluster.
@@ -58,5 +60,13 @@ spec:
       storage: 100Mi
 ```
 
-# Todo
+## Todo
 [ ] Implement CHAP authentication for iSCIS disks. Auto generate passwords if not provided
+[ ] Research and plan out data replication
+
+
+## Version History
+| Version | Description                                                               |
+| ------- | ------------------------------------------------------------------------- |
+| v0.2    | Add support for resizing disks, importing disks, & multi-node deployments |
+| v0.1    | Initial Release                                                           |

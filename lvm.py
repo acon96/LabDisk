@@ -137,6 +137,9 @@ def delete_volume(pool_name, volume_name):
         util.run_process("lvremove", f"{pool_name}/{volume_name}", "--yes")
 
 def import_volume(pool_name, volume_name, mount_point=None):
+    if volume_name is None and config.get().import_mode:
+        raise kopf.TemporaryError(f"Cannot create volume because import mode is enabled!")
+    
     if not volume_exists(pool_name, volume_name):
         raise kopf.PermanentError(f"Cannot find lvm volume to import named '{volume_name}'")
     
