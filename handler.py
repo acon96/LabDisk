@@ -65,7 +65,7 @@ def new_storageclass(name, **kwargs):
 async def operator_startup(settings: kopf.OperatorSettings, **kwargs):
 
     # overwrite default persistence settings
-    settings.persistence.finalizer = Constants.PVC_FINALIZER_KEY
+    settings.persistence.finalizer = f"{Constants.PVC_FINALIZER_KEY}-{config.get().current_node_name}"
     settings.persistence.progress_storage = kopf.AnnotationsProgressStorage(prefix=Constants.PERSISTENCE_ANNOTATION_KEY_PREFIX)
     settings.persistence.diffbase_storage = kopf.AnnotationsDiffBaseStorage(prefix=Constants.PERSISTENCE_ANNOTATION_KEY_PREFIX)
 
@@ -92,7 +92,7 @@ async def operator_startup(settings: kopf.OperatorSettings, **kwargs):
     else:
         logger.info("Individual volume subsystem will be disabled.")
 
-@kopf.on.resume("persistentvolume")
+@kopf.on.resume("persistentvolume", annotations={Constants.PV_ASSIGNED_NODE_ANNOTATION_KEY: config.get().current_node_name})
 def register_existing_volumes(spec: Spec, meta: Meta, **kwargs):
     storage_class = spec["storageClassName"]
     pv_name = meta.name
@@ -100,12 +100,6 @@ def register_existing_volumes(spec: Spec, meta: Meta, **kwargs):
     # make sure it is a storage class that we manage
     if storage_class not in registered_storage_classes:
         logger.debug(f"Not registering volume {pv_name} because it is not a lab-disk volume")
-        return
-
-    # only process volumes on this node
-    asigned_node = meta.annotations.get(Constants.PV_ASSIGNED_NODE_ANNOTATION_KEY, "")
-    if asigned_node != config.get().current_node_name:
-        logger.debug(f"Not registering volume {pv_name} because it is served by a different node")
         return
 
     sc_params = get_storage_class_params(storage_class)
@@ -149,20 +143,16 @@ def validate_pvc_spec(spec: Spec, meta: Meta, update=False):
     if storage_class_params["type"] != Constants.VOLUME_TYPE_SHARED and ("ReadWriteMany" in spec["accessModes"] or "ReadOnlyMany" in spec["accessModes"]):
         raise kopf.PermanentError(f"LabDisk only supports ReadWriteMany/ReadOnlyMany volumes using the '{Constants.VOLUME_TYPE_SHARED}' disk type")
     
-    if Constants.NODE_SELECTOR_ANNOTATION_KEY not in meta.annotations:
-        raise kopf.PermanentError(f"No node was selected to store the volume. (PVC missing annotation '{Constants.NODE_SELECTOR_ANNOTATION_KEY}'")
+    if Constants.PVC_NODE_SELECTOR_ANNOTATION_KEY not in meta.annotations:
+        raise kopf.PermanentError(f"No node was selected to store the volume. (PVC missing annotation '{Constants.PVC_NODE_SELECTOR_ANNOTATION_KEY}'")
     
     return storage_class_params
 
-@kopf.on.create("persistentvolumeclaim")
-def create_volume(meta: Meta, spec: Spec, **kwargs):
-    if spec["storageClassName"] not in registered_storage_classes:
-        logger.info(f"Volume creation for storage class that we are not monitoring. ({spec['storageClassName']})")
-        return
-    
+@kopf.on.create("persistentvolumeclaim", annotations={Constants.PVC_NODE_SELECTOR_ANNOTATION_KEY: config.get().current_node_name})
+def create_volume(meta: Meta, spec: Spec, **kwargs):   
     sc_params = validate_pvc_spec(spec, meta)
 
-    volume_node = meta.annotations[Constants.NODE_SELECTOR_ANNOTATION_KEY]
+    volume_node = meta.annotations[Constants.PVC_NODE_SELECTOR_ANNOTATION_KEY]
     current_node_name = config.get().current_node_name
     if volume_node != current_node_name:
         logger.info(f"Volume creation not for this node. (Request: {volume_node}, Us: {current_node_name}")
@@ -236,12 +226,8 @@ def create_volume(meta: Meta, spec: Spec, **kwargs):
 
     logger.info(f"Successfully provisioned volume for claim {meta.name}")
 
-@kopf.on.update("persistentvolumeclaim")
+@kopf.on.update("persistentvolumeclaim", annotations={Constants.PVC_NODE_SELECTOR_ANNOTATION_KEY: config.get().current_node_name})
 def update_volume_claim(spec: Spec, meta: Meta, old: BodyEssence, new: BodyEssence, **kwargs):
-    if spec["storageClassName"] not in registered_storage_classes:
-        logger.info(f"Volume update for storage class that we are not monitoring. ({spec['storageClassName']})")
-        return
-    
     sc_params = validate_pvc_spec(spec, meta, update=True)
 
     old_volume_size = old.get("spec").get("resources", {}).get("limits", {}).get("storage", spec["resources"].get("requests", {}).get("storage"))
@@ -257,12 +243,8 @@ def update_volume_claim(spec: Spec, meta: Meta, old: BodyEssence, new: BodyEssen
         lvm.resize_volume(lvm_group, pv_name, old_volume_size, new_volume_size)
 
 
-@kopf.on.delete("persistentvolumeclaim")
-def delete_volume_claim(spec: Spec, meta: Meta, **kwargs):
-    if spec["storageClassName"] not in registered_storage_classes:
-        logger.info(f"Volume deletion for storage class that we are not monitoring. ({spec['storageClassName']})")
-        return
-    
+@kopf.on.delete("persistentvolumeclaim", annotations={Constants.PVC_NODE_SELECTOR_ANNOTATION_KEY: config.get().current_node_name})
+def delete_volume_claim(spec: Spec, meta: Meta, **kwargs):   
     sc_params = get_storage_class_params(spec["storageClassName"])
     if "volumeName" not in spec:
         logger.info(f"Deleting a PVC that never provisioned '{meta.name}")
@@ -280,7 +262,7 @@ def delete_volume_claim(spec: Spec, meta: Meta, **kwargs):
         core_api.delete_persistent_volume(volume_name)
 
 
-@kopf.on.delete("persistentvolume")
+@kopf.on.delete("persistentvolume", annotations={Constants.PV_ASSIGNED_NODE_ANNOTATION_KEY: config.get().current_node_name})
 def delete_volume(spec: Spec, meta: Meta, **kwargs):
     storage_class = spec["storageClassName"]
     sc_params = get_storage_class_params(storage_class)
