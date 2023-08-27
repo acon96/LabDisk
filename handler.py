@@ -156,9 +156,7 @@ def validate_pvc_spec(spec: Spec, meta: Meta, update=False):
     
     return storage_class_params
 
-@kopf.on.create("persistentvolumeclaim", 
-                annotations={Constants.PVC_NODE_SELECTOR_ANNOTATION_KEY: config.get().current_node_name},
-                field="spec.storageClassName", )
+@kopf.on.create("persistentvolumeclaim", annotations={Constants.PVC_NODE_SELECTOR_ANNOTATION_KEY: config.get().current_node_name})
 def create_volume(meta: Meta, spec: Spec, **kwargs):
     sc_params = validate_pvc_spec(spec, meta)
 
