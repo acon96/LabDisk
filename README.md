@@ -5,18 +5,28 @@ LabDisk is a Kubernetes dynamic storage provisioner that provides automatic prov
 The goal of this project is to provide a persistent volume provisioner for Kubernetes that can be run in a "lab" or "homelab" environment. Persistent Storage for Kubernetes is difficult to set up if you are not using a cloud distribution or running a CSI package like Longhorn or OpenEBS.
 
 ## Installation
+This install guide assumes Ubuntu 22.04.
 
 1. Install the pre-requisites on every node in the Kubernetes cluster.
     - nfs-common
     - nfs-kernel-server
     - open-iscsi
 
+Install the pre-requisites on every node that will store data.
+    - lvm2
+
 2. Set an initiator name for every node if using iSCSI in `/etc/iscsi/initiatorname.iscsi`
 ```
 InitiatorName=iqn.2003-01.org.linux-iscsi.ragdollphysics:<kubernetes node name>
 ```
 
-3. Modify the configmap to match your deployed hardware config
+3. Create the LVM pool(s) to store the persistent volumes.
+This should be done on each node that will be used for storage on your cluster.
+a. Locate the drives you whish to use using `lsblk` and note their path (ex: /dev/sda); THESE WILL BE WIPED WHEN SETTING UP THE LVM POOL!
+a. For each drive run: `pvcreate <drive_path>` to set up the drive for LVM2
+c. Run `vgcreate <volume_group_name> <drive_path1> <drive_path2> ...` to initialize the pool.
+
+4. Modify the configmap to match your deployed hardware config
 Options:
     - provisioner: the name of the provisioner to match; defined in the PVC
     - lvm_group: the name of the LVM Volume Group (VG) to provision kubernetes Volumes in
@@ -24,7 +34,7 @@ Options:
     - iscsi_portal_addr: the interface and port to export the iSCSI volumes on. (default: 0.0.0.0:3260)
     - allow_destructive_actions: this software is still experimental. enabling this flag will allow it to perform destructive disk actions. USE AT YOUR OWN RISK
 
-4. Install the app from the manifests. Currently installs into the kube-system namespace.
+5. Install the app from the manifests. Currently installs into the kube-system namespace.
 
 ```
 kubectl apply -f manifests/

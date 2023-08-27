@@ -30,6 +30,7 @@ def create_lun_from_volume(pool_name, vol_name):
     # so.name concats pool & vol names separated by ':'
     so_name = f"{pool_name}:{vol_name}"
     try:
+        # TODO: figure out why this sometimes fails even though the device exists. can we look it up by path instead?
         so = BlockStorageObject(so_name)
     except RTSLibNotInCFS:
         so = BlockStorageObject(so_name, dev=device_path)

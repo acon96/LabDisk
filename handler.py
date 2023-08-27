@@ -139,7 +139,15 @@ def get_storage_class_params(name):
 
 def validate_pvc_spec(spec: Spec, meta: Meta, update=False):
     spec = dict(spec)
-    storage_class_params = get_storage_class_params(spec["storageClassName"])
+    storage_class = spec["storageClassName"]
+    pvc_name = meta.name
+
+    # make sure it is a storage class that we manage
+    if storage_class not in registered_storage_classes:
+        logger.debug(f"Ignroing handler invocation for PVC {pvc_name} because it is not a lab-disk volume")
+        return
+    
+    storage_class_params = get_storage_class_params(storage_class)
     if storage_class_params["type"] != Constants.VOLUME_TYPE_SHARED and ("ReadWriteMany" in spec["accessModes"] or "ReadOnlyMany" in spec["accessModes"]):
         raise kopf.PermanentError(f"LabDisk only supports ReadWriteMany/ReadOnlyMany volumes using the '{Constants.VOLUME_TYPE_SHARED}' disk type")
     
@@ -148,8 +156,10 @@ def validate_pvc_spec(spec: Spec, meta: Meta, update=False):
     
     return storage_class_params
 
-@kopf.on.create("persistentvolumeclaim", annotations={Constants.PVC_NODE_SELECTOR_ANNOTATION_KEY: config.get().current_node_name})
-def create_volume(meta: Meta, spec: Spec, **kwargs):   
+@kopf.on.create("persistentvolumeclaim", 
+                annotations={Constants.PVC_NODE_SELECTOR_ANNOTATION_KEY: config.get().current_node_name},
+                field="spec.storageClassName", )
+def create_volume(meta: Meta, spec: Spec, **kwargs):
     sc_params = validate_pvc_spec(spec, meta)
 
     volume_node = meta.annotations[Constants.PVC_NODE_SELECTOR_ANNOTATION_KEY]

@@ -166,9 +166,6 @@ def import_volume(pool_name, volume_name, mount_point=None):
                 
                 if "mkdir" in unroll:
                     os.rmdir(mount_point)
-
-                if "lvcreate" in unroll and config.get().allow_destructive_actions:
-                    util.run_process("lvremove", f"{pool_name}/{volume_name}", "--yes")
             except Exception as ex2:
                 msg = "Fatal Error encountered unrolling volume creation. Disk will be left in a intermediate state!"
                 logger.error(msg, exc_info=ex2)
