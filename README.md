@@ -20,11 +20,11 @@ Install the pre-requisites on every node that will store data.
 InitiatorName=iqn.2003-01.org.linux-iscsi.ragdollphysics:<kubernetes node name>
 ```
 
-3. Create the LVM pool(s) to store the persistent volumes.
-This should be done on each node that will be used for storage on your cluster.
-a. Locate the drives you whish to use using `lsblk` and note their path (ex: /dev/sda); THESE WILL BE WIPED WHEN SETTING UP THE LVM POOL!
-a. For each drive run: `pvcreate <drive_path>` to set up the drive for LVM2
-c. Run `vgcreate <volume_group_name> <drive_path1> <drive_path2> ...` to initialize the pool.
+3. Create the LVM pool(s) to store the persistent volumes.  
+This should be done on each node that will be used for storage on your cluster.  
+a. Locate the drives you whish to use using `lsblk` and note their path (ex: /dev/sda); THESE WILL BE WIPED WHEN SETTING UP THE LVM POOL!  
+a. For each drive run: `pvcreate <drive_path>` to set up the drive for LVM2  
+c. Run `vgcreate <volume_group_name> <drive_path1> <drive_path2> ...` to initialize the pool.  
 
 4. Modify the configmap to match your deployed hardware config
 Options:
@@ -60,7 +60,31 @@ metadata:
   labels:
     app: test
   annotations:
-    ragdollphysics.org/disk-node: k8s-dev
+    "ragdollphysics.org/disk-node": k8s-dev
+spec:
+  storageClassName: lab-disk-iscsi
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 100Mi
+```
+
+6. (Optional) Import an existing LVM Volume:  
+a. Set the `LAB_DISK_IMPORT_MODE` environment variable to "true" and restart LabDisk  
+b. Create the template below. The PV should be created that matches the name of the existing LVM volume  
+c. Undo the environment variable change and restart LabDisk again  
+```
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: test-iscsi
+  namespace: default
+  labels:
+    app: test
+  annotations:
+    "ragdollphysics.org/lvm-disk-to-import": "some-existing-lv"
+    "ragdollphysics.org/disk-node": k8s-dev
 spec:
   storageClassName: lab-disk-iscsi
   accessModes:
@@ -71,8 +95,8 @@ spec:
 ```
 
 ## Todo
-[ ] Implement CHAP authentication for iSCIS disks. Auto generate passwords if not provided
-[ ] Research and plan out data replication
+[ ] Implement CHAP authentication for iSCIS disks. Auto generate passwords if not provided  
+[ ] Research and plan out data replication  
 
 
 ## Version History
