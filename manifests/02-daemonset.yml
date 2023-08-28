@@ -44,6 +44,8 @@ spec:
         volumeMounts:
         - name: nfs-mount-root
           mountPath: /srv/nfs
+        - name: shared-nfs-mount-root
+          mountPath: /srv/shared-nfs
         - name: syskernelconfig
           mountPath: /sys/kernel/config
         - name: runlvm
@@ -56,12 +58,18 @@ spec:
           mountPath: /var/lib/nfs
         - name: hostetc
           mountPath: /app/hostetc
+        - name: etctarget
+          mountPath: /etc/target
       # nodeSelector:
       #   legacy-nfs: "true"
       volumes:
       - name: nfs-mount-root
         hostPath:
           path: /srv/nfs
+          type: DirectoryOrCreate
+      - name: shared-nfs-mount-root
+        hostPath:
+          path: /srv/shared-nfs
           type: DirectoryOrCreate
       - name: syskernelconfig 
         hostPath:
@@ -81,3 +89,7 @@ spec:
       - name: hostetc
         hostPath:
           path: /etc
+      - name: etctarget
+        hostPath:
+          path: /etc/target
+          type: DirectoryOrCreate

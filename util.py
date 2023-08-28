@@ -14,6 +14,9 @@ def run_process(*args):
     return process.stdout.splitlines()
 
 def setup_kube_client():
+    import urllib3
+    urllib3.disable_warnings()
+
     try:
         config.load_kube_config()
         

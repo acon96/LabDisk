@@ -30,6 +30,7 @@ def create_lun_from_volume(pool_name, vol_name):
     # so.name concats pool & vol names separated by ':'
     so_name = f"{pool_name}:{vol_name}"
     try:
+        # TODO: figure out why this sometimes fails even though the device exists. can we look it up by path instead?
         so = BlockStorageObject(so_name)
     except RTSLibNotInCFS:
         so = BlockStorageObject(so_name, dev=device_path)
@@ -138,7 +139,7 @@ def create_persistent_volume(pv_name, node_name, access_modes, desired_capacity,
         metadata=kubernetes.client.V1ObjectMeta(
             name=pv_name, 
             labels={"app": "storage", "component": "lab-disk"},
-            annotations={Constants.PV_NODE_ANNOTATION_KEY: node_name}
+            annotations={Constants.PV_ASSIGNED_NODE_ANNOTATION_KEY: node_name}
         ), 
         kind="PersistentVolume"
     )
@@ -150,10 +151,6 @@ def create_persistent_volume(pv_name, node_name, access_modes, desired_capacity,
 # ensure the TPG and network portal are properly configured
 def init_iscsi(node_name, portal_address, auth_config=None):
     global root, tpg
-
-    # make sure dbroot exists for RTSLib
-    with suppress(FileExistsError):
-        os.mkdir("/etc/target")
 
     root = RTSRoot()
     tpg = TPG(Target(FabricModule("iscsi"), f"iqn.2003-01.org.linux-iscsi.ragdollphysics:{node_name}"), 1)

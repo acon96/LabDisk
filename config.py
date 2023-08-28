@@ -1,20 +1,28 @@
 import os
+import sys
 import logging
 import kubernetes
 
 logger = logging.getLogger(__name__)
 
 class Constants:
-    NODE_SELECTOR_ANNOTATION_KEY = "ragdollphysics.org/disk-node"
-    SHARED_STORAGE_PATH_ANNOTATION_KEY = "ragdollphysics.org/shared-storage-path"
-    FILESYSTEM_ANNOTATION_KEY = "ragdollphysics.org/filesystem"
+    PERSISTENCE_ANNOTATION_KEY_PREFIX = "ragdollphysics.org"
+    PVC_NODE_SELECTOR_ANNOTATION_KEY = f"{PERSISTENCE_ANNOTATION_KEY_PREFIX}/disk-node"
+    SHARED_STORAGE_PATH_ANNOTATION_KEY = f"{PERSISTENCE_ANNOTATION_KEY_PREFIX}/shared-storage-path"
+    FILESYSTEM_ANNOTATION_KEY = f"{PERSISTENCE_ANNOTATION_KEY_PREFIX}/filesystem"
+    MIRROR_ANNOTATION_KEY = f"{PERSISTENCE_ANNOTATION_KEY_PREFIX}/mirror"
+    PVC_FINALIZER_KEY = f"{PERSISTENCE_ANNOTATION_KEY_PREFIX}/disk-finalizer"
+    PV_ASSIGNED_NODE_ANNOTATION_KEY = f"{PERSISTENCE_ANNOTATION_KEY_PREFIX}/lab-disk-node"
+    IMPORTED_LVM_NAME_ANNOTATION_KEY = f"{PERSISTENCE_ANNOTATION_KEY_PREFIX}/lvm-disk-to-import"
+
     VOLUME_TYPE_NFS = "nfs"
     VOLUME_TYPE_ISCSI = "iscsi"
     VOLUME_TYPE_SHARED = "shared-nfs"
 
     NFS_MOUNT_FLAGS = "rw,sync,no_subtree_check,insecure,no_root_squash"
 
-    PV_NODE_ANNOTATION_KEY = "ragdollphysics.org/lab-disk-node"
+    # support more raid modes?
+    LVM_RAID1_FLAGS = [ "--type", "raid1", "--mirrors", "1", "--nosync" ]
 
 class Config:
     def __init__(self):
@@ -34,6 +42,7 @@ class Config:
 
         self.lvm_group = config.get("lvm_group")
         self.shared_nfs_root = config.get("shared_nfs_root")
+        self.shared_nfs_nodes = config.get("shared_nfs_nodes")
         self.nfs_access_cidr = config.get("nfs_access_cidr", "0.0.0.0/0")
         self.iscsi_portal_addr = config.get("iscsi_portal_addr", "0.0.0.0:3260")
         self.iscsi_portal_port = self.iscsi_portal_addr.split(":")[1]
@@ -44,7 +53,7 @@ class Config:
 
         self.current_node_name = os.environ.get("LAB_DISK_NODE_NAME", self.current_node_ip)
 
-        self.shared_volumes_enabled = self.shared_nfs_root != None
+        self.shared_volumes_enabled = (self.shared_nfs_root != None and self.shared_nfs_nodes != None and self.current_node_name in self.shared_nfs_nodes.split(","))
         self.individual_volumes_enabled = self.lvm_group != None
 
         logger.info(f"Shared Volumes Enabled: {self.shared_volumes_enabled}")
@@ -56,6 +65,12 @@ class Config:
             logger.info("-------- WARNING --------")
             logger.info("Destructive actions are turned ON. This means that the application can potentially delete/destroy data on your disks.")
             logger.info("USE AT YOUR OWN RISK")
+
+        self.import_mode = False
+        if os.environ.get("LAB_DISK_IMPORT_MODE", "false").lower() == "true":
+            logger.info("LabDisk is in 'Import' mode!")
+            logger.info("It will not create any new LVM disks and will only match up new PVCs with existing disks")
+            self.import_mode = True
 
 
 # global config object

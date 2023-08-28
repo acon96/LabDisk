@@ -75,7 +75,7 @@ def create_persistent_volume(pv_name, node_name, access_modes, desired_capacity,
         metadata=kubernetes.client.V1ObjectMeta(
             name=pv_name, 
             labels={"app": "storage", "component": "lab-disk"},
-            annotations={Constants.PV_NODE_ANNOTATION_KEY: node_name}
+            annotations={Constants.PV_ASSIGNED_NODE_ANNOTATION_KEY: node_name}
         ), 
         kind="PersistentVolume"
     )

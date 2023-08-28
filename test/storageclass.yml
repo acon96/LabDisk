@@ -5,6 +5,7 @@ metadata:
 provisioner: ragdollphysics.org/lab-disk
 parameters:
   type: shared-nfs
+  nodes: k8s-dev
 reclaimPolicy: Retain
 allowVolumeExpansion: true
 ---
