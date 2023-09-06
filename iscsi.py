@@ -20,7 +20,7 @@ def update_iscsi_config():
     root.save_to_file()
     iscsi_config_lock.release()
 
-def create_lun_from_volume(pool_name, vol_name):
+def create_lun_from_volume(pool_name, vol_name, lun_idx=None):
     device_path = f"/dev/{pool_name}/{vol_name}"
 
     # get serial number of volume which is consistent
@@ -45,7 +45,7 @@ def create_lun_from_volume(pool_name, vol_name):
         if existing_lun.storage_object.name == so.name and existing_lun.storage_object.plugin == "block":
             return existing_lun
     else:
-        return LUN(tpg, storage_object=so)
+        return LUN(tpg, storage_object=so, lun=lun_idx)
 
 def find_lun_for_volume(pool_name, vol_name):
     # so.name concats pool & vol names separated by ':'
@@ -72,10 +72,10 @@ def export_lun_for_initiator(initiator_wwn, lun):
         update_iscsi_config()
 
 # export the disk for all nodes
-def export_disk(lvm_pool, disk_name):
+def export_disk(lvm_pool, disk_name, desired_lun_idx=None):
     core_api = kubernetes.client.CoreV1Api()
     nodes = core_api.list_node()
-    lun = create_lun_from_volume(lvm_pool, disk_name)
+    lun = create_lun_from_volume(lvm_pool, disk_name, lun_idx=desired_lun_idx)
 
     for node in nodes.items:
         node_name = node.metadata.name

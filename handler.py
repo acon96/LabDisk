@@ -113,7 +113,8 @@ def register_existing_volumes(spec: Spec, meta: Meta, **kwargs):
     elif volume_type == Constants.VOLUME_TYPE_ISCSI:
         lvm_group = config.get().lvm_group
         logger.debug(f"Exporting iSCSI share for {lvm_group}:{pv_name}")
-        iscsi.export_disk(lvm_group, pv_name)
+        lun_idx = spec["iscsi"]["lun"]
+        iscsi.export_disk(lvm_group, pv_name, desired_lun_idx=lun_idx)
 
     logger.info(f"Successfully registered existing pv '{pv_name}'")
 

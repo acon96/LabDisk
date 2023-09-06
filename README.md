@@ -96,6 +96,7 @@ spec:
 
 ## Todo
 [ ] Implement CHAP authentication for iSCIS disks. Auto generate passwords if not provided  
+[ ] Add local volumes (mount the volume then use hostpath for the pv)  
 [ ] Research and plan out data replication  
 
 
