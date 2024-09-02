@@ -1,5 +1,6 @@
 import logging
 import os
+from functools import lru_cache
 
 import kopf
 from kopf import Spec, BodyEssence, Meta
@@ -111,7 +112,7 @@ def register_existing_volumes(spec: Spec, meta: Meta, **kwargs):
         logger.debug(f"Exporting NFS share for {mount_point}")
         nfs.export_share(mount_point, config.get().nfs_access_cidr)
     elif volume_type == Constants.VOLUME_TYPE_ISCSI:
-        lvm_group = config.get().lvm_group
+        lvm_group = sc_params.get("lvm_group", config.get().lvm_group)
         logger.debug(f"Exporting iSCSI share for {lvm_group}:{pv_name}")
         lun_idx = spec["iscsi"]["lun"]
         iscsi.export_disk(lvm_group, pv_name, desired_lun_idx=lun_idx)
@@ -119,12 +120,8 @@ def register_existing_volumes(spec: Spec, meta: Meta, **kwargs):
     logger.info(f"Successfully registered existing pv '{pv_name}'")
 
 
-storage_class_params_cache = {}
-def get_storage_class_params(name):
-    global storage_class_params_cache
-    if name in storage_class_params_cache:
-        return storage_class_params_cache[name]
-    
+@lru_cache(maxsize=None)
+def get_storage_class_params(name):   
     storage_api = kubernetes.client.StorageV1Api()
     storage_class = storage_api.read_storage_class(name)
 
@@ -133,8 +130,6 @@ def get_storage_class_params(name):
     params["allow_volume_expansion"] = storage_class.allow_volume_expansion
     params["mount_options"] = storage_class.mount_options
     params["annotations"] = storage_class.metadata.annotations
-
-    storage_class_params_cache[name] = params
 
     return params
 
@@ -199,7 +194,7 @@ def create_volume(meta: Meta, spec: Spec, **kwargs):
         if not config.get().individual_volumes_enabled:
             raise kopf.PermanentError("This instance of LabDisk does not have individual volumes configured")      
 
-        lvm_group = config.get().lvm_group
+        lvm_group = sc_params.get("lvm_group", config.get().lvm_group)
 
         if volume_type == Constants.VOLUME_TYPE_ISCSI:
             if config.get().import_mode:
@@ -242,7 +237,7 @@ def update_volume_claim(spec: Spec, meta: Meta, old: BodyEssence, new: BodyEssen
     old_volume_size = old.get("spec").get("resources", {}).get("limits", {}).get("storage", spec["resources"].get("requests", {}).get("storage"))
     new_volume_size = new.get("spec").get("resources", {}).get("limits", {}).get("storage", spec["resources"].get("requests", {}).get("storage"))
 
-    lvm_group = config.get().lvm_group
+    lvm_group = sc_params.get("lvm_group", config.get().lvm_group)
     pv_name = f"pvc-{meta.uid}"
 
     if old_volume_size != new_volume_size:
@@ -277,7 +272,7 @@ def delete_volume(spec: Spec, meta: Meta, **kwargs):
     sc_params = get_storage_class_params(storage_class)
     volume_type = sc_params["type"]
     pv_name = meta.name
-    lvm_group = config.get().lvm_group
+    lvm_group = sc_params.get("lvm_group", config.get().lvm_group)
 
     if volume_type == Constants.VOLUME_TYPE_SHARED:
         return # nothing to do for shared volumes
