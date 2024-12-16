@@ -1,7 +1,8 @@
 import os
-import sys
 import logging
 import kubernetes
+import base64
+from cachetools import cached
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +39,13 @@ class Config:
         self.provisioner_name = config.get("provisioner")
 
         if not self.provisioner_name:
-            raise Exception("No proviioner name provided for this instance!")
+            raise Exception("No provisioner name provided for this instance!")
+        
+        self.supported_namespaces = config.get("supported_namespaces")
+        if self.supported_namespaces:
+            self.supported_namespaces = self.supported_namespaces.split(",")
+        else:
+            self.supported_namespaces = [ x.metadata.name for x in core_api.list_namespace().items ]
 
         self.lvm_group = config.get("lvm_group")
         self.shared_nfs_root = config.get("shared_nfs_root")
@@ -46,6 +53,9 @@ class Config:
         self.nfs_access_cidr = config.get("nfs_access_cidr", "0.0.0.0/0")
         self.iscsi_portal_addr = config.get("iscsi_portal_addr", "0.0.0.0:3260")
         self.iscsi_portal_port = self.iscsi_portal_addr.split(":")[1]
+        self.iscsi_chap_auth_enabled = config.get("chap_auth_enabled", "false").lower() == "true"
+        self.iscsi_chap_auth_secret = config.get("chap_auth_secret", "lab-disk-chap-auth")
+        self.iscsi_chap_auth_secret_autocreate = config.get("chap_auth_secret_autocreate", "true").lower() == "true"
 
         self.current_node_ip = os.environ.get("LAB_DISK_NODE_IP")
         if not self.current_node_ip:
@@ -72,13 +82,45 @@ class Config:
             logger.info("It will not create any new LVM disks and will only match up new PVCs with existing disks")
             self.import_mode = True
 
+class AuthConfig:
+    secret_root_namespace: str
+    secret_replica_namespaces: list[str]
+    chap_credentials_secret: str
+    generate_if_not_exists: bool
+
+    def __init__(self, config):
+        self.secret_root_namespace = config.get().namespace
+        self.secret_replica_namespaces = list(set(config.get().supported_namespaces) - set(self.secret_root_namespace))
+        self.chap_credentials_secret = config.get().iscsi_chap_auth_secret
+        self.generate_if_not_exists = config.get().iscsi_chap_auth_secret_autocreate
+
+    @cached
+    def get_credentials(self):
+        core_api = kubernetes.client.CoreV1Api()
+        secret: kubernetes.client.V1Secret = core_api.read_namespaced_secret(
+            name=self.chap_credentials_secret,
+            namespace=self.secret_root_namespace
+        )
+
+        discovery_username = base64.b64decode(secret.data["discovery.sendtargets.auth.username"])
+        discovery_password = base64.b64decode(secret.data["discovery.sendtargets.auth.password"])
+        session_username = base64.b64decode(secret.data["node.session.auth.username"])
+        session_password = base64.b64decode(secret.data["node.session.auth.password"])
+
+        return discovery_username, discovery_password, session_username, session_password
+
 
 # global config object
 config = None
+auth_config = None
 
 def setup(*args):
-    global config
+    global config, auth_config
     config = Config(*args)
+    auth_config = AuthConfig(config)
 
 def get() -> Config:
     return config
+
+def get_auth() -> AuthConfig:
+    return auth_config

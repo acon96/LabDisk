@@ -89,7 +89,10 @@ async def operator_startup(settings: kopf.OperatorSettings, **kwargs):
     
     if config.get().individual_volumes_enabled:
         logger.info("Starting individual volumes subsystem...")
-        iscsi.init_iscsi(config.get().current_node_name, config.get().iscsi_portal_addr, None)
+        auth_config = None
+        if config.get().iscsi_chap_auth_enabled:
+            auth_config = config.get_auth()
+        iscsi.init_iscsi(config.get().current_node_name, config.get().iscsi_portal_addr, auth_config)
     else:
         logger.info("Individual volume subsystem will be disabled.")
 
@@ -207,10 +210,15 @@ def create_volume(meta: Meta, spec: Spec, **kwargs):
             # setup iscsi exports using rtstlib-fb
             iscsi_lun = iscsi.export_disk(lvm_group, pv_name)
 
+            # get chap auth if it is enabled
+            auth_config = None
+            if config.get().iscsi_chap_auth_enabled:
+                auth_config = config.get_auth()
+
             # create the pv object using the iscsi share info
             iscsi_portal = f"{config.get().current_node_ip}:{config.get().iscsi_portal_port}"
             iscsi_target = f"iqn.2003-01.org.linux-iscsi.ragdollphysics:{config.get().current_node_name}"
-            iscsi.create_persistent_volume(pv_name, current_node_name, access_modes, desired_volume_size, iscsi_portal, iscsi_target, iscsi_lun, fs_type, spec["storageClassName"], spec["volumeMode"])
+            iscsi.create_persistent_volume(pv_name, current_node_name, access_modes, desired_volume_size, iscsi_portal, iscsi_target, iscsi_lun, fs_type, spec["storageClassName"], spec["volumeMode"], auth_config)
 
         if volume_type == Constants.VOLUME_TYPE_NFS:
             mount_point = f"/srv/nfs/{pv_name}"
