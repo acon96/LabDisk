@@ -118,7 +118,13 @@ def register_existing_volumes(spec: Spec, meta: Meta, **kwargs):
         lvm_group = sc_params.get("lvm_group", config.get().lvm_group)
         logger.debug(f"Exporting iSCSI share for {lvm_group}:{pv_name}")
         lun_idx = spec["iscsi"]["lun"]
-        iscsi.export_disk(lvm_group, pv_name, desired_lun_idx=lun_idx)
+
+        # get chap auth if it is enabled
+        auth_config = None
+        if config.get().iscsi_chap_auth_enabled:
+            auth_config = config.get_auth()
+        
+        iscsi.export_disk(lvm_group, pv_name, auth_config, desired_lun_idx=lun_idx)
 
     logger.info(f"Successfully registered existing pv '{pv_name}'")
 
@@ -143,7 +149,7 @@ def validate_pvc_spec(spec: Spec, meta: Meta, update=False):
 
     # make sure it is a storage class that we manage
     if storage_class not in registered_storage_classes:
-        logger.debug(f"Ignroing handler invocation for PVC {pvc_name} because it is not a lab-disk volume")
+        logger.debug(f"Ignoring handler invocation for PVC {pvc_name} because it is not a lab-disk volume")
         return
     
     storage_class_params = get_storage_class_params(storage_class)
@@ -158,6 +164,8 @@ def validate_pvc_spec(spec: Spec, meta: Meta, update=False):
 @kopf.on.create("persistentvolumeclaim", annotations={Constants.PVC_NODE_SELECTOR_ANNOTATION_KEY: config.get().current_node_name})
 def create_volume(meta: Meta, spec: Spec, **kwargs):
     sc_params = validate_pvc_spec(spec, meta)
+    if not sc_params:
+        return
 
     volume_node = meta.annotations[Constants.PVC_NODE_SELECTOR_ANNOTATION_KEY]
     current_node_name = config.get().current_node_name
@@ -207,13 +215,13 @@ def create_volume(meta: Meta, spec: Spec, **kwargs):
                 # provision lvm volume
                 lvm.create_volume(lvm_group, pv_name, fs_type, mirror_disk, desired_volume_size)
 
-            # setup iscsi exports using rtstlib-fb
-            iscsi_lun = iscsi.export_disk(lvm_group, pv_name)
-
             # get chap auth if it is enabled
             auth_config = None
             if config.get().iscsi_chap_auth_enabled:
                 auth_config = config.get_auth()
+
+            # setup iscsi exports using rtstlib-fb
+            iscsi_lun = iscsi.export_disk(lvm_group, pv_name, auth_config)
 
             # create the pv object using the iscsi share info
             iscsi_portal = f"{config.get().current_node_ip}:{config.get().iscsi_portal_port}"
@@ -241,6 +249,8 @@ def create_volume(meta: Meta, spec: Spec, **kwargs):
 @kopf.on.update("persistentvolumeclaim", annotations={Constants.PVC_NODE_SELECTOR_ANNOTATION_KEY: config.get().current_node_name})
 def update_volume_claim(spec: Spec, meta: Meta, old: BodyEssence, new: BodyEssence, **kwargs):
     sc_params = validate_pvc_spec(spec, meta, update=True)
+    if not sc_params:
+        return
 
     old_volume_size = old.get("spec").get("resources", {}).get("limits", {}).get("storage", spec["resources"].get("requests", {}).get("storage"))
     new_volume_size = new.get("spec").get("resources", {}).get("limits", {}).get("storage", spec["resources"].get("requests", {}).get("storage"))
@@ -256,8 +266,17 @@ def update_volume_claim(spec: Spec, meta: Meta, old: BodyEssence, new: BodyEssen
 
 
 @kopf.on.delete("persistentvolumeclaim", annotations={Constants.PVC_NODE_SELECTOR_ANNOTATION_KEY: config.get().current_node_name})
-def delete_volume_claim(spec: Spec, meta: Meta, **kwargs):   
+def delete_volume_claim(spec: Spec, meta: Meta, **kwargs):
+    storage_class = spec["storageClassName"]
+    pvc_name = meta.name
+
+    # make sure it is a storage class that we manage
+    if storage_class not in registered_storage_classes:
+        logger.debug(f"Not deleting volume {pvc_name} because it is not a lab-disk volume")
+        return
+    
     sc_params = get_storage_class_params(spec["storageClassName"])
+    
     if "volumeName" not in spec:
         logger.info(f"Deleting a PVC that never provisioned '{meta.name}")
         return

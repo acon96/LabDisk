@@ -65,12 +65,11 @@ def find_lun_for_volume(pool_name, vol_name):
     
     return None
 
-def export_lun_for_initiator(initiator_wwn, lun):
+def export_lun_for_initiator(initiator_wwn, lun, auth_config):
     node_acl = tpg.node_acl(initiator_wwn)
 
-    # TODO: is this needed or is setting the chap settings at the TPG level enough
-    # if auth_config:
-    #     _, _, node_acl.chap_userid, node_acl.chap_password = auth_config.get_credentials()
+    if auth_config:
+        _, _, node_acl.chap_userid, node_acl.chap_password = auth_config.get_credentials()
 
     # only create mappedlun if it doesn't already exist
     try:
@@ -80,7 +79,7 @@ def export_lun_for_initiator(initiator_wwn, lun):
         update_iscsi_config()
 
 # export the disk for all nodes
-def export_disk(lvm_pool, disk_name, desired_lun_idx=None):
+def export_disk(lvm_pool, disk_name, auth_config, desired_lun_idx=None):
     core_api = kubernetes.client.CoreV1Api()
     nodes = core_api.list_node()
     lun = create_lun_from_volume(lvm_pool, disk_name, lun_idx=desired_lun_idx)
@@ -88,7 +87,7 @@ def export_disk(lvm_pool, disk_name, desired_lun_idx=None):
     for node in nodes.items:
         node_name = node.metadata.name
         initiator_name = f"iqn.2003-01.org.linux-iscsi.ragdollphysics:{node_name}"
-        export_lun_for_initiator(initiator_name, lun)
+        export_lun_for_initiator(initiator_name, lun, auth_config)
 
     return lun.lun
 
@@ -145,6 +144,7 @@ def create_persistent_volume(pv_name, node_name, access_modes, desired_capacity,
 
     if auth_config:
         pv["iscsi"] = {
+            **pv["iscsi"],
             "chapAuthDiscovery": True,
             "chapAuthSession": True,
             "secretRef": {
@@ -181,7 +181,7 @@ def enable_chap_auth(tpg: TPG, auth_config: AuthConfig):
             
             new_secret = kubernetes.client.V1Secret(
                 type="kubernetes.io/iscsi-chap",
-                metatada=kubernetes.client.V1ObjectMeta(
+                metadata=kubernetes.client.V1ObjectMeta(
                     name=auth_config.chap_credentials_secret,
                 ),
                 string_data={
@@ -199,7 +199,7 @@ def enable_chap_auth(tpg: TPG, auth_config: AuthConfig):
 
     new_secret = kubernetes.client.V1Secret(
         type="kubernetes.io/iscsi-chap",
-        metatada=kubernetes.client.V1ObjectMeta(
+        metadata=kubernetes.client.V1ObjectMeta(
             name=auth_config.chap_credentials_secret,
         ),
         string_data={

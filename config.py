@@ -2,7 +2,7 @@ import os
 import logging
 import kubernetes
 import base64
-from cachetools import cached
+from functools import lru_cache
 
 logger = logging.getLogger(__name__)
 
@@ -88,13 +88,13 @@ class AuthConfig:
     chap_credentials_secret: str
     generate_if_not_exists: bool
 
-    def __init__(self, config):
-        self.secret_root_namespace = config.get().namespace
-        self.secret_replica_namespaces = list(set(config.get().supported_namespaces) - set(self.secret_root_namespace))
-        self.chap_credentials_secret = config.get().iscsi_chap_auth_secret
-        self.generate_if_not_exists = config.get().iscsi_chap_auth_secret_autocreate
+    def __init__(self, config: Config):
+        self.secret_root_namespace = config.namespace
+        self.secret_replica_namespaces = list(set(config.supported_namespaces) - set(self.secret_root_namespace))
+        self.chap_credentials_secret = config.iscsi_chap_auth_secret
+        self.generate_if_not_exists = config.iscsi_chap_auth_secret_autocreate
 
-    @cached
+    @lru_cache()
     def get_credentials(self):
         core_api = kubernetes.client.CoreV1Api()
         secret: kubernetes.client.V1Secret = core_api.read_namespaced_secret(
@@ -102,10 +102,10 @@ class AuthConfig:
             namespace=self.secret_root_namespace
         )
 
-        discovery_username = base64.b64decode(secret.data["discovery.sendtargets.auth.username"])
-        discovery_password = base64.b64decode(secret.data["discovery.sendtargets.auth.password"])
-        session_username = base64.b64decode(secret.data["node.session.auth.username"])
-        session_password = base64.b64decode(secret.data["node.session.auth.password"])
+        discovery_username = base64.b64decode(secret.data["discovery.sendtargets.auth.username"]).decode()
+        discovery_password = base64.b64decode(secret.data["discovery.sendtargets.auth.password"]).decode()
+        session_username = base64.b64decode(secret.data["node.session.auth.username"]).decode()
+        session_password = base64.b64decode(secret.data["node.session.auth.password"]).decode()
 
         return discovery_username, discovery_password, session_username, session_password
 
