@@ -104,10 +104,23 @@ class AuthConfig:
 
         discovery_username = base64.b64decode(secret.data["discovery.sendtargets.auth.username"]).decode()
         discovery_password = base64.b64decode(secret.data["discovery.sendtargets.auth.password"]).decode()
+        discovery_username_in = base64.b64decode(secret.data["discovery.sendtargets.auth.username_in"]).decode()
+        discovery_password_in = base64.b64decode(secret.data["discovery.sendtargets.auth.password_in"]).decode()
         session_username = base64.b64decode(secret.data["node.session.auth.username"]).decode()
         session_password = base64.b64decode(secret.data["node.session.auth.password"]).decode()
+        session_username_in = base64.b64decode(secret.data["node.session.auth.username_in"]).decode()
+        session_password_in = base64.b64decode(secret.data["node.session.auth.password_in"]).decode()
 
-        return discovery_username, discovery_password, session_username, session_password
+        return {
+            "discovery_username": discovery_username,
+            "discovery_password": discovery_password,
+            "discovery_username_in": discovery_username_in,
+            "discovery_password_in": discovery_password_in,
+            "session_username": session_username,
+            "session_password": session_password,
+            "session_username_in": session_username_in,
+            "session_password_in": session_password_in,
+        }
 
 
 # global config object

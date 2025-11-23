@@ -1,6 +1,7 @@
 import logging
 import os
 from functools import lru_cache
+from copy import deepcopy
 
 import kopf
 from kopf import Spec, BodyEssence, Meta
@@ -109,12 +110,13 @@ def register_existing_volumes(spec: Spec, meta: Meta, **kwargs):
     sc_params = get_storage_class_params(storage_class)
     volume_type = sc_params["type"]
 
-    # re-mount individual NFS exports
     if volume_type == Constants.VOLUME_TYPE_NFS:
+        # re-mount individual NFS exports
         mount_point = f"/srv/nfs/{pv_name}"
         logger.debug(f"Exporting NFS share for {mount_point}")
         nfs.export_share(mount_point, config.get().nfs_access_cidr)
     elif volume_type == Constants.VOLUME_TYPE_ISCSI:
+        # re-export iscsi targets
         lvm_group = sc_params.get("lvm_group", config.get().lvm_group)
         logger.debug(f"Exporting iSCSI share for {lvm_group}:{pv_name}")
         lun_idx = spec["iscsi"]["lun"]
@@ -123,6 +125,31 @@ def register_existing_volumes(spec: Spec, meta: Meta, **kwargs):
         auth_config = None
         if config.get().iscsi_chap_auth_enabled:
             auth_config = config.get_auth()
+
+        updated_spec= None
+        if auth_config and "secretRef" not in spec["iscsi"]:
+            # add auth config to spec
+            updated_spec = deepcopy(spec)
+            updated_spec["iscsi"]["chapAuthDiscovery"] = True
+            updated_spec["iscsi"]["chapAuthSession"] = True
+            updated_spec["iscsi"]["secretRef"] = { "name": auth_config.chap_credentials_secret }
+        elif not auth_config and "secretRef" in spec["iscsi"]:
+            # remove auth config from spec
+            updated_spec = deepcopy(spec)
+            del updated_spec["iscsi"]["chapAuthDiscovery"]
+            del updated_spec["iscsi"]["chapAuthSession"]
+            del updated_spec["iscsi"]["secretRef"]
+        
+        if updated_spec:
+            body = kubernetes.client.V1PersistentVolume(
+                api_version='v1',
+                spec=updated_spec,
+                metadata=meta, 
+                kind="PersistentVolume"
+            )
+
+            core_api = kubernetes.client.CoreV1Api()
+            core_api.patch_persistent_volume(meta.name, body)
         
         iscsi.export_disk(lvm_group, pv_name, auth_config, desired_lun_idx=lun_idx)
 
@@ -316,3 +343,90 @@ def delete_volume(spec: Spec, meta: Meta, **kwargs):
 
     # delete the volume (if destructive actions are on)
     lvm.delete_volume(lvm_group, pv_name)
+
+"""
+HOURS_TO_SECONDS = 60.0 * 60.0
+@kopf.timer("persistentvolume", interval=1 * HOURS_TO_SECONDS, annotations={Constants.PV_ASSIGNED_NODE_ANNOTATION_KEY: config.get().current_node_name})
+def check_for_iscsi_cleanup(spec, **kwargs):
+    storage_class = spec["storageClassName"]
+
+    # make sure it is a storage class that we manage
+    if storage_class not in registered_storage_classes:
+        return
+
+    claim_namespace = spec.get("claimRef", {}).get("namespace", "")
+    claim_name = spec.get("claimRef", {}).get("name", "")
+
+    core_api = kubernetes.client.CoreV1Api()
+
+    pod_list: kubernetes.client.V1PodList = core_api.list_namespaced_pod(claim_namespace)
+    pods_using_volume = []
+    for pod in pod_list.items:
+        for volume in pod.spec.volumes:
+            if volume.persistent_volume_claim:
+                if (volume.persistent_volume_claim.claim_name == claim_name):
+                    pods_using_volume.append(pod)
+
+    # TODO: check for broken pod and if a pod is broken, then schedule the iscsi cleanup job
+    # the cleanup job should only run once every 10 minutes at most (sync it with the ttl of the job)
+
+def create_iscsi_cleanup_job(node_name):
+    # Define Job spec
+    job = kubernetes.client.V1Job(
+        api_version="batch/v1",
+        kind="Job",
+        metadata=kubernetes.client.V1ObjectMeta(name=f"iscsi-mount-check-{node_name}"),
+        spec=kubernetes.client.V1JobSpec(
+            template=kubernetes.client.V1PodTemplateSpec(
+                # TODO: copy metadata from current pod
+                metadata=kubernetes.client.V1ObjectMeta(labels={"app": "lab-disk"}),
+                spec=kubernetes.client.V1PodSpec(
+                    containers=[
+                        kubernetes.client.V1Container(
+                            name="iscsi-check",
+                            image="alpine:latest",
+                            command=["/bin/sh", "-c"],
+                            args=[
+                                """
+                                for dir in /var/lib/kubelet/plugins/kubernetes.io/iscsi/iface-default/*; do
+                                  if [ -d "$dir" ] && ! ls "$dir" &>/dev/null; then
+                                    echo "Unmounting inaccessible directory: $dir"
+                                    umount -lf "$dir"
+                                    rm -rf "$dir"
+                                  fi
+                                done
+                                """
+                            ],
+                            volume_mounts=[
+                                kubernetes.client.V1VolumeMount(
+                                    name="kubelet-mounts",
+                                    mount_path="/var/lib/kubelet/plugins/kubernetes.io/iscsi/iface-default"
+                                )
+                            ],
+                        )
+                    ],
+                    restart_policy="OnFailure",
+                    node_selector={"kubernetes.io/hostname": node_name},
+                    volumes=[
+                        kubernetes.client.V1Volume(
+                            name="kubelet-mounts",
+                            host_path=kubernetes.client.V1HostPathVolumeSource(
+                                path="/var/lib/kubelet/plugins/kubernetes.io/iscsi/iface-default",
+                                type="Directory"
+                            )
+                        )
+                    ],
+                ),
+            ),
+            ttl_seconds_after_finished=600,
+        ),
+    )
+
+    # Create the Job
+    batch_v1 = kubernetes.client.BatchV1Api()
+    response = batch_v1.create_namespaced_job(
+        body=job, namespace=config.get().namespace
+    )
+    logger.info(f"Job created. Status='{response.status}'")
+
+"""
