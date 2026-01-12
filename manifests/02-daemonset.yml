@@ -37,10 +37,10 @@ spec:
         resources:
           requests:
             cpu: 100m
-            memory: 16Mi
+            memory: 256Mi
           limits:
             cpu: 500m
-            memory: 128Mi        
+            memory: 1Gi        
         volumeMounts:
         - name: nfs-mount-root
           mountPath: /srv/nfs

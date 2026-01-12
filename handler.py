@@ -1,5 +1,7 @@
 import logging
 import os
+from functools import lru_cache
+from copy import deepcopy
 
 import kopf
 from kopf import Spec, BodyEssence, Meta
@@ -88,7 +90,10 @@ async def operator_startup(settings: kopf.OperatorSettings, **kwargs):
     
     if config.get().individual_volumes_enabled:
         logger.info("Starting individual volumes subsystem...")
-        iscsi.init_iscsi(config.get().current_node_name, config.get().iscsi_portal_addr, None)
+        auth_config = None
+        if config.get().iscsi_chap_auth_enabled:
+            auth_config = config.get_auth()
+        iscsi.init_iscsi(config.get().current_node_name, config.get().iscsi_portal_addr, auth_config)
     else:
         logger.info("Individual volume subsystem will be disabled.")
 
@@ -105,25 +110,59 @@ def register_existing_volumes(spec: Spec, meta: Meta, **kwargs):
     sc_params = get_storage_class_params(storage_class)
     volume_type = sc_params["type"]
 
-    # re-mount individual NFS exports
     if volume_type == Constants.VOLUME_TYPE_NFS:
+        # re-mount individual NFS exports
         mount_point = f"/srv/nfs/{pv_name}"
         logger.debug(f"Exporting NFS share for {mount_point}")
         nfs.export_share(mount_point, config.get().nfs_access_cidr)
     elif volume_type == Constants.VOLUME_TYPE_ISCSI:
-        lvm_group = config.get().lvm_group
+        # re-export iscsi targets
+        lvm_group = sc_params.get("lvm_group", config.get().lvm_group)
         logger.debug(f"Exporting iSCSI share for {lvm_group}:{pv_name}")
-        iscsi.export_disk(lvm_group, pv_name)
+        lun_idx = spec["iscsi"]["lun"]
+
+        # get chap auth if it is enabled
+        auth_config = None
+        if config.get().iscsi_chap_auth_enabled:
+            auth_config = config.get_auth()
+
+        updated_spec= None
+        if auth_config and "secretRef" not in spec["iscsi"]:
+            # add auth config to spec
+            updated_spec = deepcopy(spec)
+            updated_spec["iscsi"]["chapAuthDiscovery"] = True
+            updated_spec["iscsi"]["chapAuthSession"] = True
+            updated_spec["iscsi"]["secretRef"] = { "name": auth_config.chap_credentials_secret }
+        elif not auth_config and "secretRef" in spec["iscsi"]:
+            # remove auth config from spec
+            updated_spec = deepcopy(spec)
+            del updated_spec["iscsi"]["chapAuthDiscovery"]
+            del updated_spec["iscsi"]["chapAuthSession"]
+            del updated_spec["iscsi"]["secretRef"]
+        
+        if updated_spec:
+            body = kubernetes.client.V1PersistentVolume(
+                api_version='v1',
+                spec=updated_spec,
+                metadata=kubernetes.client.V1ObjectMeta(
+                    name=meta.name, 
+                    namespace=meta.namespace,
+                    labels=meta.labels,
+                    annotations=meta.annotations
+                ),
+                kind="PersistentVolume"
+            )
+
+            core_api = kubernetes.client.CoreV1Api()
+            core_api.patch_persistent_volume(meta.name, body)
+        
+        iscsi.export_disk(lvm_group, pv_name, auth_config, desired_lun_idx=lun_idx)
 
     logger.info(f"Successfully registered existing pv '{pv_name}'")
 
 
-storage_class_params_cache = {}
-def get_storage_class_params(name):
-    global storage_class_params_cache
-    if name in storage_class_params_cache:
-        return storage_class_params_cache[name]
-    
+@lru_cache(maxsize=None)
+def get_storage_class_params(name):   
     storage_api = kubernetes.client.StorageV1Api()
     storage_class = storage_api.read_storage_class(name)
 
@@ -132,8 +171,6 @@ def get_storage_class_params(name):
     params["allow_volume_expansion"] = storage_class.allow_volume_expansion
     params["mount_options"] = storage_class.mount_options
     params["annotations"] = storage_class.metadata.annotations
-
-    storage_class_params_cache[name] = params
 
     return params
 
@@ -144,7 +181,7 @@ def validate_pvc_spec(spec: Spec, meta: Meta, update=False):
 
     # make sure it is a storage class that we manage
     if storage_class not in registered_storage_classes:
-        logger.debug(f"Ignroing handler invocation for PVC {pvc_name} because it is not a lab-disk volume")
+        logger.debug(f"Ignoring handler invocation for PVC {pvc_name} because it is not a lab-disk volume")
         return
     
     storage_class_params = get_storage_class_params(storage_class)
@@ -159,6 +196,8 @@ def validate_pvc_spec(spec: Spec, meta: Meta, update=False):
 @kopf.on.create("persistentvolumeclaim", annotations={Constants.PVC_NODE_SELECTOR_ANNOTATION_KEY: config.get().current_node_name})
 def create_volume(meta: Meta, spec: Spec, **kwargs):
     sc_params = validate_pvc_spec(spec, meta)
+    if not sc_params:
+        return
 
     volume_node = meta.annotations[Constants.PVC_NODE_SELECTOR_ANNOTATION_KEY]
     current_node_name = config.get().current_node_name
@@ -198,7 +237,7 @@ def create_volume(meta: Meta, spec: Spec, **kwargs):
         if not config.get().individual_volumes_enabled:
             raise kopf.PermanentError("This instance of LabDisk does not have individual volumes configured")      
 
-        lvm_group = config.get().lvm_group
+        lvm_group = sc_params.get("lvm_group", config.get().lvm_group)
 
         if volume_type == Constants.VOLUME_TYPE_ISCSI:
             if config.get().import_mode:
@@ -208,13 +247,18 @@ def create_volume(meta: Meta, spec: Spec, **kwargs):
                 # provision lvm volume
                 lvm.create_volume(lvm_group, pv_name, fs_type, mirror_disk, desired_volume_size)
 
+            # get chap auth if it is enabled
+            auth_config = None
+            if config.get().iscsi_chap_auth_enabled:
+                auth_config = config.get_auth()
+
             # setup iscsi exports using rtstlib-fb
-            iscsi_lun = iscsi.export_disk(lvm_group, pv_name)
+            iscsi_lun = iscsi.export_disk(lvm_group, pv_name, auth_config)
 
             # create the pv object using the iscsi share info
             iscsi_portal = f"{config.get().current_node_ip}:{config.get().iscsi_portal_port}"
             iscsi_target = f"iqn.2003-01.org.linux-iscsi.ragdollphysics:{config.get().current_node_name}"
-            iscsi.create_persistent_volume(pv_name, current_node_name, access_modes, desired_volume_size, iscsi_portal, iscsi_target, iscsi_lun, fs_type, spec["storageClassName"], spec["volumeMode"])
+            iscsi.create_persistent_volume(pv_name, current_node_name, access_modes, desired_volume_size, iscsi_portal, iscsi_target, iscsi_lun, fs_type, spec["storageClassName"], spec["volumeMode"], auth_config)
 
         if volume_type == Constants.VOLUME_TYPE_NFS:
             mount_point = f"/srv/nfs/{pv_name}"
@@ -237,11 +281,13 @@ def create_volume(meta: Meta, spec: Spec, **kwargs):
 @kopf.on.update("persistentvolumeclaim", annotations={Constants.PVC_NODE_SELECTOR_ANNOTATION_KEY: config.get().current_node_name})
 def update_volume_claim(spec: Spec, meta: Meta, old: BodyEssence, new: BodyEssence, **kwargs):
     sc_params = validate_pvc_spec(spec, meta, update=True)
+    if not sc_params:
+        return
 
     old_volume_size = old.get("spec").get("resources", {}).get("limits", {}).get("storage", spec["resources"].get("requests", {}).get("storage"))
     new_volume_size = new.get("spec").get("resources", {}).get("limits", {}).get("storage", spec["resources"].get("requests", {}).get("storage"))
 
-    lvm_group = config.get().lvm_group
+    lvm_group = sc_params.get("lvm_group", config.get().lvm_group)
     pv_name = f"pvc-{meta.uid}"
 
     if old_volume_size != new_volume_size:
@@ -252,8 +298,17 @@ def update_volume_claim(spec: Spec, meta: Meta, old: BodyEssence, new: BodyEssen
 
 
 @kopf.on.delete("persistentvolumeclaim", annotations={Constants.PVC_NODE_SELECTOR_ANNOTATION_KEY: config.get().current_node_name})
-def delete_volume_claim(spec: Spec, meta: Meta, **kwargs):   
+def delete_volume_claim(spec: Spec, meta: Meta, **kwargs):
+    storage_class = spec["storageClassName"]
+    pvc_name = meta.name
+
+    # make sure it is a storage class that we manage
+    if storage_class not in registered_storage_classes:
+        logger.debug(f"Not deleting volume {pvc_name} because it is not a lab-disk volume")
+        return
+    
     sc_params = get_storage_class_params(spec["storageClassName"])
+    
     if "volumeName" not in spec:
         logger.info(f"Deleting a PVC that never provisioned '{meta.name}")
         return
@@ -276,7 +331,7 @@ def delete_volume(spec: Spec, meta: Meta, **kwargs):
     sc_params = get_storage_class_params(storage_class)
     volume_type = sc_params["type"]
     pv_name = meta.name
-    lvm_group = config.get().lvm_group
+    lvm_group = sc_params.get("lvm_group", config.get().lvm_group)
 
     if volume_type == Constants.VOLUME_TYPE_SHARED:
         return # nothing to do for shared volumes

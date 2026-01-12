@@ -95,12 +95,14 @@ spec:
 ```
 
 ## Todo
-[ ] Implement CHAP authentication for iSCIS disks. Auto generate passwords if not provided  
+[x] Implement CHAP authentication for iSCIS disks. Auto generate passwords if not provided  
+[ ] Add local volumes (mount the volume then use hostpath for the pv)  
 [ ] Research and plan out data replication  
 
 
 ## Version History
-| Version | Description                                                               |
-| ------- | ------------------------------------------------------------------------- |
-| v0.2    | Add support for resizing disks, importing disks, & multi-node deployments |
-| v0.1    | Initial Release                                                           |
+| Version | Description                                                                                 |
+|---------|---------------------------------------------------------------------------------------------|
+| v0.3    | Add CHAP auth support for iSCSI volumes, multi-volume group support, fix lun mapping issues |
+| v0.2    | Add support for resizing disks, importing disks, & multi-node deployments                   |
+| v0.1    | Initial Release                                                                             |

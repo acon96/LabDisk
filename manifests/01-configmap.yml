@@ -11,3 +11,4 @@ data:
   nfs_access_cidr: 10.0.0.0/8
   iscsi_portal_addr: 0.0.0.0:3260
   allow_destructive_actions: "true"
+  chap_auth_enabled: "true"

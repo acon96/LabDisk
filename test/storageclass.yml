@@ -48,3 +48,14 @@ parameters:
   type: iscsi
 reclaimPolicy: Delete
 allowVolumeExpansion: true
+---
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: lab-disk-iscsi-lvm-group
+provisioner: ragdollphysics.org/lab-disk
+parameters:
+  type: iscsi
+  lvm_group: second-lvm-group
+reclaimPolicy: Retain
+allowVolumeExpansion: true
